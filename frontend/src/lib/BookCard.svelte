@@ -1,9 +1,9 @@
 <script>
   import { createEventDispatcher } from 'svelte';
-  import { openBook, getTOC, getProgress, getChapter } from './api.js';
+  import { openBook, getTOC, getProgress, getChapter, getHighlights } from './api.js';
   import {
-    view, currentBook, currentBookId, toc, spineCount,
-    currentSpineIndex, currentChapter
+    currentBook, currentBookId, currentChapter,
+    currentSpineIndex, spineCount, toc, view, highlights
   } from '../stores/app.js';
 
   export let book;
@@ -22,6 +22,9 @@
 
       const tocData = await getTOC(book.id);
       toc.set(tocData || []);
+
+      const highlightsData = await getHighlights(book.id);
+      highlights.set(highlightsData || []);
 
       // Restore progress
       const progress = await getProgress(book.id);

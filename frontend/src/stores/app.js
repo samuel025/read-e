@@ -16,6 +16,8 @@ export const spineCount = writable(0);
 export const view = writable('library'); // 'library' | 'reader'
 export const tocOpen = writable(true);
 export const settingsOpen = writable(false);
+export const activeSidebarTab = writable('toc'); // 'toc' | 'highlights'
+export const highlights = writable([]); // Highlight[]
 
 // ---- Settings ----
 export const settings = writable({

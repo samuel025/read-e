@@ -92,3 +92,21 @@ export async function selectFile() {
   if (!go) return '';
   return go.SelectFile();
 }
+
+export async function addHighlight(highlight) {
+  const go = getGoBinding();
+  if (!go) return;
+  return go.AddHighlight(highlight);
+}
+
+export async function getHighlights(bookID) {
+  const go = getGoBinding();
+  if (!go) return [];
+  return go.GetHighlights(bookID);
+}
+
+export async function deleteHighlight(id) {
+  const go = getGoBinding();
+  if (!go) return;
+  return go.DeleteHighlight(id);
+}

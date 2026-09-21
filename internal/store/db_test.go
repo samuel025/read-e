@@ -41,7 +41,6 @@ func TestStore(t *testing.T) {
 			t.Errorf("expected 'sepia', got %q", val)
 		}
 
-		// Update setting
 		if err := st.SaveSetting("theme", "nord"); err != nil {
 			t.Fatalf("failed to update setting: %v", err)
 		}
@@ -77,7 +76,6 @@ func TestStore(t *testing.T) {
 			t.Errorf("unexpected book meta: %+v", books[0])
 		}
 
-		// Save progress
 		progress := epub.ReadingPosition{
 			BookID:       "book-123",
 			SpineIndex:   3,
@@ -95,7 +93,6 @@ func TestStore(t *testing.T) {
 			t.Errorf("unexpected progress: %+v", retrievedPos)
 		}
 
-		// Verify has_progress is now true in GetBooks
 		books, err = st.GetBooks()
 		if err != nil {
 			t.Fatalf("failed to get books: %v", err)
@@ -104,7 +101,63 @@ func TestStore(t *testing.T) {
 			t.Errorf("expected book to have progress")
 		}
 
-		// Remove book
+		// Highlights test
+		h1 := epub.Highlight{
+			ID:         "hl-1",
+			BookID:     "book-123",
+			SpineIndex: 3,
+			Text:       "Call me Ishmael.",
+			Prefix:     "Chapter 1. ",
+			Suffix:     " Some years ago",
+			Color:      "yellow",
+			Note:       "Famous opening line",
+			CreatedAt:  time.Now(),
+		}
+		if err := st.SaveHighlight(h1); err != nil {
+			t.Fatalf("failed to save highlight: %v", err)
+		}
+
+		h2 := epub.Highlight{
+			ID:         "hl-2",
+			BookID:     "book-123",
+			SpineIndex: 3,
+			Text:       "whenever my hypos get such an upper hand",
+			Color:      "purple",
+		}
+		if err := st.SaveHighlight(h2); err != nil {
+			t.Fatalf("failed to save highlight 2: %v", err)
+		}
+
+		highlights, err := st.GetHighlights("book-123")
+		if err != nil {
+			t.Fatalf("failed to get highlights: %v", err)
+		}
+		if len(highlights) != 2 {
+			t.Fatalf("expected 2 highlights, got %d", len(highlights))
+		}
+		if highlights[0].Color != "yellow" || highlights[1].Color != "purple" {
+			t.Errorf("unexpected highlight colors: %+v", highlights)
+		}
+
+		// Update highlight color
+		h1.Color = "green"
+		if err := st.SaveHighlight(h1); err != nil {
+			t.Fatalf("failed to update highlight: %v", err)
+		}
+		highlights, _ = st.GetHighlights("book-123")
+		if highlights[0].Color != "green" {
+			t.Errorf("expected updated color 'green', got %q", highlights[0].Color)
+		}
+
+		// Delete a highlight
+		if err := st.DeleteHighlight("hl-1"); err != nil {
+			t.Fatalf("failed to delete highlight: %v", err)
+		}
+		highlights, _ = st.GetHighlights("book-123")
+		if len(highlights) != 1 || highlights[0].ID != "hl-2" {
+			t.Fatalf("expected 1 highlight after deletion, got %d", len(highlights))
+		}
+
 		if err := st.RemoveBook("book-123"); err != nil {
 			t.Fatalf("failed to remove book: %v", err)
 		}
@@ -115,6 +168,12 @@ func TestStore(t *testing.T) {
 		}
 		if len(books) != 0 {
 			t.Fatalf("expected 0 books after removal, got %d", len(books))
+		}
+
+		// Cascaded delete check
+		highlights, _ = st.GetHighlights("book-123")
+		if len(highlights) != 0 {
+			t.Fatalf("expected 0 highlights after book removal, got %d", len(highlights))
 		}
 	})
 }

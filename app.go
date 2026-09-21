@@ -150,6 +150,18 @@ func (a *App) GetProgress(bookID string) (epub.ReadingPosition, error) {
 	return a.store.GetProgress(bookID)
 }
 
+func (a *App) AddHighlight(h epub.Highlight) error {
+	return a.store.SaveHighlight(h)
+}
+
+func (a *App) GetHighlights(bookID string) ([]epub.Highlight, error) {
+	return a.store.GetHighlights(bookID)
+}
+
+func (a *App) DeleteHighlight(id string) error {
+	return a.store.DeleteHighlight(id)
+}
+
 func (a *App) SaveSettings(settings epub.AppSettings) error {
 	data, err := json.Marshal(settings)
 	if err != nil {

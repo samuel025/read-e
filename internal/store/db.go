@@ -23,9 +23,14 @@ func New(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
 
-	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL")
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_foreign_keys=on")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+
+	if _, err := db.Exec("PRAGMA foreign_keys = ON;"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("enable foreign keys: %w", err)
 	}
 
 	s := &Store{db: db}
@@ -62,6 +67,19 @@ func (s *Store) migrate() error {
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL DEFAULT ''
 	);
+	CREATE TABLE IF NOT EXISTS highlights (
+		id TEXT PRIMARY KEY,
+		book_id TEXT NOT NULL,
+		spine_index INTEGER NOT NULL DEFAULT 0,
+		text TEXT NOT NULL,
+		prefix TEXT NOT NULL DEFAULT '',
+		suffix TEXT NOT NULL DEFAULT '',
+		color TEXT NOT NULL DEFAULT 'yellow',
+		note TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_highlights_book ON highlights(book_id, spine_index);
 	`
 	_, err := s.db.Exec(schema)
 	return err
@@ -149,4 +167,49 @@ func (s *Store) GetSetting(key string) string {
 	var val string
 	s.db.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&val)
 	return val
+}
+
+func (s *Store) SaveHighlight(h epub.Highlight) error {
+	if h.CreatedAt.IsZero() {
+		h.CreatedAt = time.Now()
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO highlights (id, book_id, spine_index, text, prefix, suffix, color, note, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			color = excluded.color,
+			note = excluded.note
+	`, h.ID, h.BookID, h.SpineIndex, h.Text, h.Prefix, h.Suffix, h.Color, h.Note, h.CreatedAt)
+	return err
+}
+
+func (s *Store) GetHighlights(bookID string) ([]epub.Highlight, error) {
+	rows, err := s.db.Query(`
+		SELECT id, book_id, spine_index, text, prefix, suffix, color, note, created_at
+		FROM highlights
+		WHERE book_id = ?
+		ORDER BY spine_index ASC, created_at ASC
+	`, bookID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var highlights []epub.Highlight
+	for rows.Next() {
+		var h epub.Highlight
+		if err := rows.Scan(&h.ID, &h.BookID, &h.SpineIndex, &h.Text, &h.Prefix, &h.Suffix, &h.Color, &h.Note, &h.CreatedAt); err != nil {
+			return nil, err
+		}
+		highlights = append(highlights, h)
+	}
+	if highlights == nil {
+		highlights = []epub.Highlight{}
+	}
+	return highlights, rows.Err()
+}
+
+func (s *Store) DeleteHighlight(id string) error {
+	_, err := s.db.Exec("DELETE FROM highlights WHERE id = ?", id)
+	return err
 }

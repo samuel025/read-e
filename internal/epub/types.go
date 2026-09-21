@@ -1,5 +1,7 @@
 package epub
 
+import "time"
+
 type BookInfo struct {
 	Title       string `json:"title"`
 	Author      string `json:"author"`
@@ -31,6 +33,18 @@ type ReadingPosition struct {
 	BookID       string  `json:"bookId"`
 	SpineIndex   int     `json:"spineIndex"`
 	ScrollOffset float64 `json:"scrollOffset"`
+}
+
+type Highlight struct {
+	ID         string    `json:"id"`
+	BookID     string    `json:"bookId"`
+	SpineIndex int       `json:"spineIndex"`
+	Text       string    `json:"text"`
+	Prefix     string    `json:"prefix,omitempty"`
+	Suffix     string    `json:"suffix,omitempty"`
+	Color      string    `json:"color"`
+	Note       string    `json:"note,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 type AppSettings struct {

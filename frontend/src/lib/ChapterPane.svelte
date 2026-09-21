@@ -1,15 +1,14 @@
 <script>
-  import { onMount, afterUpdate } from 'svelte';
+  import { onMount } from 'svelte';
   import {
     currentChapter, currentBookId, currentSpineIndex,
-    spineCount, settings
+    spineCount, settings, highlights
   } from '../stores/app.js';
-  import { getChapter, saveProgress, getProgress } from './api.js';
+  import { getChapter, saveProgress, getProgress, addHighlight, deleteHighlight } from './api.js';
 
   let iframeEl;
   let loading = false;
 
-  // Navigate to next/prev chapter
   async function navigate(delta) {
     const newIndex = $currentSpineIndex + delta;
     if (newIndex < 0 || newIndex >= $spineCount) return;
@@ -26,7 +25,6 @@
     }
   }
 
-  // Build the theme CSS to inject into the chapter iframe
   $: themeCSS = buildThemeCSS($settings);
 
   function buildThemeCSS(s) {
@@ -37,6 +35,7 @@
       nord: { bg: '#2e3440', fg: '#eceff4', link: '#88c0d0', highlight: 'rgba(136, 192, 208, 0.28)' },
     };
     const t = themes[s.theme] || themes.dark;
+    const isDark = s.theme === 'dark' || s.theme === 'nord';
 
     return `
       <style>
@@ -237,6 +236,103 @@
           padding: 0 !important;
         }
 
+        /* ==================== MULTI-COLOR HIGHLIGHTING ==================== */
+        mark.reader-highlight {
+          border-radius: 3px;
+          padding: 1px 3px;
+          cursor: pointer;
+          transition: filter 0.15s ease, box-shadow 0.15s ease;
+          display: inline;
+        }
+        mark.reader-highlight:hover {
+          filter: brightness(0.92);
+        }
+
+        mark.reader-highlight-yellow {
+          background-color: ${isDark ? 'rgba(234, 179, 8, 0.45)' : 'rgba(254, 240, 138, 0.78)'};
+          color: inherit;
+        }
+        mark.reader-highlight-green {
+          background-color: ${isDark ? 'rgba(34, 197, 94, 0.42)' : 'rgba(187, 247, 208, 0.78)'};
+          color: inherit;
+        }
+        mark.reader-highlight-blue {
+          background-color: ${isDark ? 'rgba(59, 130, 246, 0.42)' : 'rgba(191, 219, 254, 0.78)'};
+          color: inherit;
+        }
+        mark.reader-highlight-purple {
+          background-color: ${isDark ? 'rgba(168, 85, 247, 0.42)' : 'rgba(233, 213, 255, 0.78)'};
+          color: inherit;
+        }
+        mark.reader-highlight-pink {
+          background-color: ${isDark ? 'rgba(244, 63, 94, 0.42)' : 'rgba(254, 205, 211, 0.78)'};
+          color: inherit;
+        }
+
+        /* Floating Selection Menu */
+        .reader-selection-menu {
+          position: absolute;
+          z-index: 10000;
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          padding: 6px 10px;
+          background: ${isDark ? '#1f2430' : '#ffffff'};
+          border: 1px solid ${isDark ? 'rgba(255,255,255,0.14)' : 'rgba(0,0,0,0.12)'};
+          border-radius: 28px;
+          box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.08);
+          user-select: none;
+          pointer-events: auto;
+          animation: menuPopIn 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        @keyframes menuPopIn {
+          0% { transform: scale(0.85) translateY(4px); opacity: 0; }
+          100% { transform: scale(1) translateY(0); opacity: 1; }
+        }
+
+        .reader-color-btn {
+          width: 22px;
+          height: 22px;
+          border-radius: 50%;
+          border: 2px solid transparent;
+          cursor: pointer;
+          padding: 0;
+          transition: transform 0.12s ease, border-color 0.12s ease;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .reader-color-btn:hover {
+          transform: scale(1.25);
+          border-color: ${isDark ? '#ffffff' : '#111827'};
+        }
+
+        .reader-menu-divider {
+          width: 1px;
+          height: 16px;
+          background: ${isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'};
+          margin: 0 2px;
+        }
+
+        .reader-delete-btn {
+          background: transparent;
+          border: none;
+          color: #ef4444;
+          cursor: pointer;
+          padding: 2px;
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: transform 0.12s ease, opacity 0.12s ease;
+          opacity: 0.85;
+        }
+        .reader-delete-btn:hover {
+          transform: scale(1.15);
+          opacity: 1;
+        }
+
         @media (prefers-reduced-motion: reduce) {
           * { transition: none !important; animation: none !important; }
         }
@@ -246,17 +342,22 @@
     `;
   }
 
-  $: srcdoc = buildSrcdoc($currentChapter, themeCSS);
+  $: chapterHighlights = $highlights.filter(h => h.bookId === $currentBookId && h.spineIndex === $currentSpineIndex);
+  $: srcdoc = buildSrcdoc($currentChapter, themeCSS, chapterHighlights, $currentBookId, $currentSpineIndex);
 
-  function buildSrcdoc(chapter, css) {
+  function buildSrcdoc(chapter, css, highlightsList, bookId, spineIndex) {
     if (!chapter) return '';
 
     const script = `
       <script>
         (function() {
+          var bookId = ${JSON.stringify(bookId || '')};
+          var spineIndex = ${spineIndex || 0};
+          var existingHighlights = ${JSON.stringify(highlightsList || [])};
+
           function setupContentEnhancements() {
             try {
-              // 1. Clean up empty blockquotes (Kindle/Calibre indentation artifacts)
+              // 1. Clean up empty blockquotes
               var blockquotes = document.querySelectorAll('blockquote');
               for (var b = 0; b < blockquotes.length; b++) {
                 var bq = blockquotes[b];
@@ -268,7 +369,7 @@
                 }
               }
 
-              // 2. Collapse artificial spacer divs/p elements that contain only whitespace or &nbsp;
+              // 2. Collapse artificial spacer divs/p elements
               var candidates = document.querySelectorAll('div, p');
               for (var c = 0; c < candidates.length; c++) {
                 var el = candidates[c];
@@ -284,7 +385,7 @@
                 }
               }
 
-              // 3. Detect Table of Contents pages and apply compact spacing
+              // 3. Detect Table of Contents pages
               var headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6');
               var isTOC = false;
               for (var h = 0; h < headings.length; h++) {
@@ -363,8 +464,283 @@
                   }, 1800);
                 }
               });
-            } catch (err) {}
+
+              // 5. Restore saved highlights
+              restoreHighlights(existingHighlights);
+
+              // 6. Setup text selection toolbar
+              setupSelectionToolbar();
+
+            } catch (err) {
+              console.warn('content enhancements error:', err);
+            }
           }
+
+          function restoreHighlights(list) {
+            if (!list || !list.length) return;
+
+            list.forEach(function(h) {
+              if (document.querySelector('mark[data-highlight-id="' + h.id + '"]')) return;
+              if (!h.text) return;
+
+              wrapTextMatch(h);
+            });
+          }
+
+          function wrapTextMatch(h) {
+            var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+            var node;
+            var candidates = [];
+            while (node = walker.nextNode()) {
+              if (node.parentElement && (node.parentElement.classList.contains('reader-highlight') || node.parentElement.closest('.reader-selection-menu'))) {
+                continue;
+              }
+              var val = node.nodeValue;
+              var pos = val.indexOf(h.text);
+              if (pos !== -1) {
+                candidates.push({ node: node, pos: pos });
+              }
+            }
+
+            for (var c = 0; c < candidates.length; c++) {
+              var cand = candidates[c];
+              try {
+                var range = document.createRange();
+                range.setStart(cand.node, cand.pos);
+                range.setEnd(cand.node, cand.pos + h.text.length);
+
+                var mark = document.createElement('mark');
+                mark.className = 'reader-highlight reader-highlight-' + (h.color || 'yellow');
+                mark.setAttribute('data-highlight-id', h.id);
+                mark.setAttribute('data-color', h.color || 'yellow');
+
+                var frag = range.extractContents();
+                mark.appendChild(frag);
+                range.insertNode(mark);
+                return;
+              } catch (e) {}
+            }
+          }
+
+          var activeMenu = null;
+
+          function removeMenu() {
+            if (activeMenu && activeMenu.parentNode) {
+              activeMenu.parentNode.removeChild(activeMenu);
+            }
+            activeMenu = null;
+          }
+
+          function setupSelectionToolbar() {
+            var colorList = [
+              { id: 'yellow', hex: '#eab308' },
+              { id: 'green',  hex: '#22c55e' },
+              { id: 'blue',   hex: '#3b82f6' },
+              { id: 'purple', hex: '#a855f7' },
+              { id: 'pink',   hex: '#f43f5e' }
+            ];
+
+            function handleSelectionEnd() {
+              var sel = window.getSelection();
+              if (!sel || sel.isCollapsed) {
+                return;
+              }
+              var selectedText = sel.toString().trim();
+              if (!selectedText) {
+                return;
+              }
+
+              var range = sel.getRangeAt(0);
+              var rect = range.getBoundingClientRect();
+              if (rect.width === 0 && rect.height === 0) return;
+
+              removeMenu();
+
+              var menu = document.createElement('div');
+              menu.className = 'reader-selection-menu';
+
+              colorList.forEach(function(c) {
+                var btn = document.createElement('button');
+                btn.className = 'reader-color-btn';
+                btn.style.background = c.hex;
+                btn.title = 'Highlight ' + c.id;
+                btn.addEventListener('mousedown', function(e) {
+                  e.preventDefault();
+                  e.stopPropagation();
+
+                  createHighlightFromRange(range, selectedText, c.id);
+                  sel.removeAllRanges();
+                  removeMenu();
+                });
+                menu.appendChild(btn);
+              });
+
+              document.body.appendChild(menu);
+              activeMenu = menu;
+
+              var menuWidth = 160;
+              var top = rect.top + window.scrollY - 44;
+              if (top < window.scrollY + 10) {
+                top = rect.bottom + window.scrollY + 8;
+              }
+              var left = rect.left + window.scrollX + (rect.width / 2) - (menuWidth / 2);
+              left = Math.max(12, Math.min(left, document.body.clientWidth - menuWidth - 12));
+
+              menu.style.top = top + 'px';
+              menu.style.left = left + 'px';
+            }
+
+            document.addEventListener('mouseup', function(e) {
+              if (e.target.closest('.reader-selection-menu')) return;
+              setTimeout(handleSelectionEnd, 30);
+            });
+
+            document.addEventListener('mousedown', function(e) {
+              if (activeMenu && !activeMenu.contains(e.target) && !e.target.closest('mark.reader-highlight')) {
+                removeMenu();
+              }
+            });
+
+            // Handle clicking existing mark
+            document.addEventListener('click', function(e) {
+              var mark = e.target.closest('mark.reader-highlight');
+              if (!mark) return;
+
+              e.preventDefault();
+              e.stopPropagation();
+
+              var highlightId = mark.getAttribute('data-highlight-id');
+              var currentColor = mark.getAttribute('data-color') || 'yellow';
+              var rect = mark.getBoundingClientRect();
+
+              removeMenu();
+
+              var menu = document.createElement('div');
+              menu.className = 'reader-selection-menu';
+
+              colorList.forEach(function(c) {
+                var btn = document.createElement('button');
+                btn.className = 'reader-color-btn';
+                btn.style.background = c.hex;
+                if (c.id === currentColor) {
+                  btn.style.borderColor = '#ffffff';
+                }
+                btn.title = 'Change to ' + c.id;
+                btn.addEventListener('mousedown', function(ev) {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+
+                  mark.className = 'reader-highlight reader-highlight-' + c.id;
+                  mark.setAttribute('data-color', c.id);
+                  window.parent.postMessage({
+                    type: 'update-highlight',
+                    highlightId: highlightId,
+                    color: c.id
+                  }, '*');
+                  removeMenu();
+                });
+                menu.appendChild(btn);
+              });
+
+              var divider = document.createElement('div');
+              divider.className = 'reader-menu-divider';
+              menu.appendChild(divider);
+
+              var delBtn = document.createElement('button');
+              delBtn.className = 'reader-delete-btn';
+              delBtn.title = 'Delete highlight';
+              delBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>';
+              delBtn.addEventListener('mousedown', function(ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+
+                var parent = mark.parentNode;
+                while (mark.firstChild) {
+                  parent.insertBefore(mark.firstChild, mark);
+                }
+                parent.removeChild(mark);
+
+                window.parent.postMessage({
+                  type: 'delete-highlight',
+                  highlightId: highlightId
+                }, '*');
+                removeMenu();
+              });
+              menu.appendChild(delBtn);
+
+              document.body.appendChild(menu);
+              activeMenu = menu;
+
+              var menuWidth = 195;
+              var top = rect.top + window.scrollY - 44;
+              if (top < window.scrollY + 10) {
+                top = rect.bottom + window.scrollY + 8;
+              }
+              var left = rect.left + window.scrollX + (rect.width / 2) - (menuWidth / 2);
+              left = Math.max(12, Math.min(left, document.body.clientWidth - menuWidth - 12));
+
+              menu.style.top = top + 'px';
+              menu.style.left = left + 'px';
+            });
+          }
+
+          function createHighlightFromRange(range, text, color) {
+            var id = 'hl-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
+
+            var mark = document.createElement('mark');
+            mark.className = 'reader-highlight reader-highlight-' + color;
+            mark.setAttribute('data-highlight-id', id);
+            mark.setAttribute('data-color', color);
+
+            try {
+              var frag = range.extractContents();
+              mark.appendChild(frag);
+              range.insertNode(mark);
+            } catch (e) {
+              return;
+            }
+
+            var highlightData = {
+              id: id,
+              bookId: bookId,
+              spineIndex: spineIndex,
+              text: text,
+              color: color,
+              createdAt: new Date().toISOString()
+            };
+
+            window.parent.postMessage({
+              type: 'create-highlight',
+              highlight: highlightData
+            }, '*');
+          }
+
+          // Listen for commands from parent window
+          window.addEventListener('message', function(e) {
+            if (!e.data || !e.data.type) return;
+
+            if (e.data.type === 'jump-to-highlight') {
+              var mark = document.querySelector('mark[data-highlight-id="' + e.data.highlightId + '"]');
+              if (mark) {
+                mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                mark.classList.remove('reader-target-highlight');
+                void mark.offsetWidth;
+                mark.classList.add('reader-target-highlight');
+                setTimeout(function() {
+                  mark.classList.remove('reader-target-highlight');
+                }, 2000);
+              }
+            } else if (e.data.type === 'remove-highlight-mark') {
+              var markToRemove = document.querySelector('mark[data-highlight-id="' + e.data.highlightId + '"]');
+              if (markToRemove) {
+                var parent = markToRemove.parentNode;
+                while (markToRemove.firstChild) {
+                  parent.insertBefore(markToRemove.firstChild, markToRemove);
+                }
+                parent.removeChild(markToRemove);
+              }
+            }
+          });
 
           if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', setupContentEnhancements);
@@ -382,7 +758,6 @@
     return `<!DOCTYPE html><html><head>${injection}</head><body>${chapter}</body></html>`;
   }
 
-  // Keyboard navigation
   function handleKeydown(e) {
     if (e.key === 'ArrowRight' || e.key === 'PageDown') {
       e.preventDefault();
@@ -393,23 +768,48 @@
     }
   }
 
+  function handleWindowMessage(e) {
+    if (!e.data || !e.data.type) return;
+
+    if (e.data.type === 'create-highlight') {
+      const h = e.data.highlight;
+      addHighlight(h);
+      highlights.update(items => [...items, h]);
+    } else if (e.data.type === 'update-highlight') {
+      const { highlightId, color } = e.data;
+      highlights.update(items => items.map(h => {
+        if (h.id === highlightId) {
+          const updated = { ...h, color };
+          addHighlight(updated);
+          return updated;
+        }
+        return h;
+      }));
+    } else if (e.data.type === 'delete-highlight') {
+      const { highlightId } = e.data;
+      deleteHighlight(highlightId);
+      highlights.update(items => items.filter(h => h.id !== highlightId));
+    }
+  }
+
   onMount(() => {
     window.addEventListener('keydown', handleKeydown);
-    return () => window.removeEventListener('keydown', handleKeydown);
+    window.addEventListener('message', handleWindowMessage);
+    return () => {
+      window.removeEventListener('keydown', handleKeydown);
+      window.removeEventListener('message', handleWindowMessage);
+    };
   });
 
-  // Save scroll position periodically
   function handleIframeLoad() {
     if (!iframeEl?.contentWindow) return;
 
-    // Restore scroll position
     getProgress($currentBookId).then((pos) => {
       if (pos?.scrollOffset && iframeEl?.contentWindow) {
         iframeEl.contentWindow.scrollTo(0, pos.scrollOffset);
       }
     });
 
-    // Save scroll on interval
     const interval = setInterval(() => {
       if (iframeEl?.contentWindow) {
         const scrollY = iframeEl.contentWindow.scrollY || 0;
@@ -417,7 +817,6 @@
       }
     }, 5000);
 
-    // Cleanup on next load
     iframeEl.addEventListener('load', () => clearInterval(interval), { once: true });
   }
 </script>
@@ -491,58 +890,60 @@
   }
 
   .spinner {
-    width: 28px;
-    height: 28px;
-    border: 3px solid var(--border-subtle);
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--border-subtle);
     border-top-color: var(--accent);
     border-radius: 50%;
-    animation: spin 0.6s linear infinite;
+    animation: spin 0.8s linear infinite;
   }
 
   @keyframes spin {
     to { transform: rotate(360deg); }
   }
 
-  /* Floating chapter nav arrows */
   .chapter-nav {
     position: absolute;
     bottom: 24px;
     right: 24px;
     display: flex;
-    gap: var(--space-xs);
+    gap: 8px;
     z-index: 5;
+    pointer-events: none;
   }
 
   .nav-btn {
+    pointer-events: auto;
     width: 40px;
     height: 40px;
-    border-radius: 50%;
-    border: none;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--glass-border);
     background: var(--glass-bg);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    color: var(--fg-primary);
+    color: var(--fg-secondary);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     box-shadow: var(--shadow-md);
     transition: transform var(--duration-fast) var(--ease-out),
-                background var(--duration-normal) var(--ease-out),
-                opacity var(--duration-normal) var(--ease-out);
+                color var(--duration-fast) var(--ease-out),
+                background var(--duration-fast) var(--ease-out);
   }
 
-  .nav-btn:hover {
-    background: var(--bg-elevated);
-    box-shadow: var(--shadow-lg);
+  .nav-btn:hover:not(.disabled) {
+    transform: scale(1.08);
+    color: var(--fg-primary);
+    background: var(--bg-hover);
   }
 
-  .nav-btn:active {
-    transform: scale(0.93);
+  .nav-btn:active:not(.disabled) {
+    transform: scale(0.95);
   }
 
   .nav-btn.disabled {
     opacity: 0.3;
-    pointer-events: none;
+    cursor: not-allowed;
   }
 </style>

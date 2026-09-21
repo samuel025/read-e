@@ -1,7 +1,8 @@
 <script>
   import {
     view, currentBook, currentBookId, currentSpineIndex,
-    spineCount, tocOpen, settings, settingsOpen
+    spineCount, tocOpen, settings, settingsOpen,
+    activeSidebarTab, highlights
   } from '../stores/app.js';
   import { saveSettings } from './api.js';
 
@@ -12,7 +13,21 @@
   }
 
   function toggleTOC() {
-    tocOpen.update((v) => !v);
+    if ($tocOpen && $activeSidebarTab === 'toc') {
+      tocOpen.set(false);
+    } else {
+      tocOpen.set(true);
+      activeSidebarTab.set('toc');
+    }
+  }
+
+  function toggleHighlights() {
+    if ($tocOpen && $activeSidebarTab === 'highlights') {
+      tocOpen.set(false);
+    } else {
+      tocOpen.set(true);
+      activeSidebarTab.set('highlights');
+    }
   }
 
   async function changeFontSize(delta) {
@@ -49,9 +64,15 @@
         <path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>
       </svg>
     </button>
-    <button class="btn btn-ghost btn-icon" on:click={toggleTOC} title="Toggle table of contents" id="toc-toggle-btn">
+    <button class="btn btn-ghost btn-icon" class:active={$tocOpen && $activeSidebarTab === 'toc'} on:click={toggleTOC} title="Table of contents" id="toc-toggle-btn">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M3 12h18"/><path d="M3 6h18"/><path d="M3 18h18"/>
+      </svg>
+    </button>
+    <button class="btn btn-ghost btn-icon" class:active={$tocOpen && $activeSidebarTab === 'highlights'} on:click={toggleHighlights} title="Highlights ({$highlights.length})" id="highlights-toggle-btn">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m9 11-6 6v3h3l6-6"/>
+        <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/>
       </svg>
     </button>
     {#if $currentBook}
