@@ -103,6 +103,18 @@ func (a *App) UpdateBookCover(bookID string, coverBase64 string) error {
 	return a.store.UpdateBookCover(bookID, coverBase64)
 }
 
+func (a *App) LogReadingSession(date string, durationSecs int, pagesTurned int) error {
+	return a.store.LogReadingSession(date, durationSecs, pagesTurned)
+}
+
+func (a *App) MarkBookFinished(bookID string, finished bool) error {
+	return a.store.MarkBookFinished(bookID, finished)
+}
+
+func (a *App) GetReadingInsights() (store.ReadingInsights, error) {
+	return a.store.GetReadingInsights()
+}
+
 func (a *App) RemoveBook(bookID string) error {
 	a.mu.Lock()
 	if r, ok := a.openBooks[bookID]; ok {

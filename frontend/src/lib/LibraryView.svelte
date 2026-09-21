@@ -2,9 +2,11 @@
   import { library, libraryLoading, settings, settingsOpen } from '../stores/app.js';
   import { scanLibrary, addBook, selectFolder, selectFile, getLibrary, removeBook, getPDFData, updateBookCover } from './api.js';
   import BookCard from './BookCard.svelte';
+  import InsightsModal from './InsightsModal.svelte';
 
   let searchQuery = '';
   const generatingCovers = new Set();
+  let showInsights = false;
 
   $: filteredBooks = $library.filter((b) => {
     if (!searchQuery) return true;
@@ -117,6 +119,12 @@
       <span class="book-count">{$library.length} {$library.length === 1 ? 'book' : 'books'}</span>
     </div>
     <div class="header-actions">
+      <button class="btn btn-outline" on:click={() => showInsights = true}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 20V10M18 20V4M6 20v-4" />
+        </svg>
+        Insights
+      </button>
       <div class="search-wrapper">
         <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
@@ -202,7 +210,9 @@
   </main>
 </div>
 
-
+{#if showInsights}
+  <InsightsModal on:close={() => showInsights = false} />
+{/if}
 
 <style>
   .library-view {

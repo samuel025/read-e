@@ -45,6 +45,24 @@ export async function updateBookCover(bookID, coverBase64) {
   return go.UpdateBookCover(bookID, coverBase64);
 }
 
+export async function logReadingSession(date, durationSecs, pagesTurned) {
+  const go = getGoBinding();
+  if (!go) return;
+  return go.LogReadingSession(date, durationSecs, pagesTurned);
+}
+
+export async function markBookFinished(bookID, finished) {
+  const go = getGoBinding();
+  if (!go) return;
+  return go.MarkBookFinished(bookID, finished);
+}
+
+export async function getReadingInsights() {
+  const go = getGoBinding();
+  if (!go) return { total_hours: 0, finished_books: 0, current_streak: 0, longest_streak: 0, daily_data: [] };
+  return go.GetReadingInsights();
+}
+
 export async function openBook(bookID) {
   const go = getGoBinding();
   if (!go) return {};

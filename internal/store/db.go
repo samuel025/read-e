@@ -100,6 +100,18 @@ func (s *Store) migrate() error {
 	// Safely add format column if migrating existing database
 	_, _ = s.db.Exec("ALTER TABLE books ADD COLUMN format TEXT NOT NULL DEFAULT 'epub';")
 
+	// Safely add finished column to progress if migrating existing database
+	_, _ = s.db.Exec("ALTER TABLE progress ADD COLUMN finished BOOLEAN NOT NULL DEFAULT 0;")
+
+	// Create reading_sessions table
+	_, _ = s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS reading_sessions (
+			date TEXT PRIMARY KEY,
+			duration_seconds INTEGER NOT NULL DEFAULT 0,
+			pages_turned INTEGER NOT NULL DEFAULT 0
+		);
+	`)
+
 	return nil
 }
 
@@ -304,4 +316,102 @@ func (s *Store) GetBookmarks(bookID string) ([]epub.Bookmark, error) {
 func (s *Store) DeleteBookmark(id string) error {
 	_, err := s.db.Exec("DELETE FROM bookmarks WHERE id = ?", id)
 	return err
+}
+
+// Insights Models and Methods
+type DailySession struct {
+	Date            string `json:"date"`
+	DurationSeconds int    `json:"duration_seconds"`
+	PagesTurned     int    `json:"pages_turned"`
+}
+
+type ReadingInsights struct {
+	TotalHours      float64        `json:"total_hours"`
+	FinishedBooks   int            `json:"finished_books"`
+	CurrentStreak   int            `json:"current_streak"`
+	LongestStreak   int            `json:"longest_streak"`
+	DailyData       []DailySession `json:"daily_data"`
+}
+
+func (s *Store) LogReadingSession(date string, durationSecs int, pagesTurned int) error {
+	_, err := s.db.Exec(`
+		INSERT INTO reading_sessions (date, duration_seconds, pages_turned)
+		VALUES (?, ?, ?)
+		ON CONFLICT(date) DO UPDATE SET
+			duration_seconds = duration_seconds + excluded.duration_seconds,
+			pages_turned = pages_turned + excluded.pages_turned
+	`, date, durationSecs, pagesTurned)
+	return err
+}
+
+func (s *Store) MarkBookFinished(bookID string, finished bool) error {
+	val := 0
+	if finished {
+		val = 1
+	}
+	_, err := s.db.Exec(`
+		UPDATE progress SET finished = ?, updated_at = CURRENT_TIMESTAMP WHERE book_id = ?
+	`, val, bookID)
+	return err
+}
+
+func (s *Store) GetReadingInsights() (ReadingInsights, error) {
+	var insights ReadingInsights
+
+	rows, err := s.db.Query(`SELECT date, duration_seconds, pages_turned FROM reading_sessions ORDER BY date ASC`)
+	if err != nil {
+		return insights, err
+	}
+	defer rows.Close()
+
+	var totalSeconds int
+	for rows.Next() {
+		var d DailySession
+		if err := rows.Scan(&d.Date, &d.DurationSeconds, &d.PagesTurned); err == nil {
+			insights.DailyData = append(insights.DailyData, d)
+			totalSeconds += d.DurationSeconds
+		}
+	}
+	insights.TotalHours = float64(totalSeconds) / 3600.0
+
+	currentStreak := 0
+	longestStreak := 0
+	streakCounter := 0
+	var lastDate time.Time
+
+	for i, session := range insights.DailyData {
+		date, err := time.Parse("2006-01-02", session.Date)
+		if err != nil {
+			continue
+		}
+		if i == 0 || date.Sub(lastDate).Hours() <= 24.0 {
+			streakCounter++
+		} else {
+			streakCounter = 1
+		}
+		if streakCounter > longestStreak {
+			longestStreak = streakCounter
+		}
+		lastDate = date
+	}
+	
+	if len(insights.DailyData) > 0 {
+		lastSessionDate, _ := time.Parse("2006-01-02", insights.DailyData[len(insights.DailyData)-1].Date)
+		now := time.Now()
+		today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		diffDays := today.Sub(lastSessionDate).Hours() / 24.0
+		if diffDays <= 1.0 {
+			currentStreak = streakCounter
+		} else {
+			currentStreak = 0
+		}
+	}
+	
+	insights.CurrentStreak = currentStreak
+	insights.LongestStreak = longestStreak
+
+	row := s.db.QueryRow(`SELECT COUNT(*) FROM progress WHERE finished = 1`)
+	_ = row.Scan(&insights.FinishedBooks)
+
+	return insights, nil
 }
