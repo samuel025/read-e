@@ -38,9 +38,15 @@ All data, including book metadata, reading progress, highlights, notes, and book
 - Reading Statistics and Pacing: Real-time chapter and document word-count calculation displaying estimated reading time remaining based on a standard 220 WPM pacing model.
 - Table of Contents: Complete hierarchy navigation supporting nested sections, chapters, and PDF bookmarks.
 
+### Reading Insights Dashboard
+- Reading Streaks: Automatic tracking of current day streak and all-time longest streak.
+- Active Reading Time: Inactivity-aware background tracking of total reading time (hours & minutes).
+- 30-Day Activity Heatmap: Visual GitHub-style daily reading grid displaying habit trends over the past month.
+- Automatic Completion: Books are automatically marked as "Finished" upon reading through the final chapter or page.
+
 ### Library Management
 - Local File Import: Add individual `.epub` or `.pdf` files, or recursively scan local directories.
-- Automated Cover Extraction: Multi-tier cover discovery supporting OPF manifest properties, metadata identifiers, and structural heuristics.
+- Automated Cover Extraction: Multi-tier cover discovery supporting OPF manifest properties, metadata identifiers, PDF.js first-page rendering, and structural heuristics.
 - Format Indicators: Visual document format badges for clear distinction between EPUB and PDF library items.
 - Progress Tracking: Continuous, background persistence of chapter or page index and vertical scroll offset.
 
@@ -54,6 +60,7 @@ The application is structured into decoupled layers communicating through Wails 
 +------------------------------------------------------------------+
 |                    Frontend (Svelte 4 + Vite)                    |
 |  - App Router & Global Overlays (SearchModal, SettingsPanel)     |
+|  - Insights Modal (Streaks, stats, 30-day activity heatmap)      |
 |  - Reader View (Toolbar, TOCSidebar, Bookmarks, Highlights)      |
 |  - Sandboxed Chapter Frame (In-place popovers, multi-node marks) |
 +---------------------------------+--------------------------------+
@@ -68,7 +75,7 @@ The application is structured into decoupled layers communicating through Wails 
                                   |
 +---------------------------------v--------------------------------+
 |                   Local Storage & Persistence                    |
-|  - SQLite Database: ~/.config/read-e/reader.db (Linux)           |
+|  - SQLite Database: ~/.config/read-e/library.db (Linux)          |
 |    or AppData/Roaming (Windows) / Application Support (macOS)    |
 +------------------------------------------------------------------+
 ```
@@ -118,11 +125,25 @@ sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential
    # Linux (using WebKit2GTK 4.1)
    wails build -tags webkit2_41
 
-   # macOS / Windows
-   wails build
+   # Or simply
+   make build
    ```
 
-The compiled binary will be placed in the `build/bin/` directory.
+The compiled binary will be placed in `build/bin/read-e`.
+
+### Debian / Ubuntu Packaging (.deb)
+
+Build and bundle **read e** into a `.deb` package with desktop integration, MIME-type associations, and high-resolution icons:
+
+```bash
+# Build binary and generate .deb package in dist/
+make package
+```
+
+Install the resulting `.deb` package:
+```bash
+sudo apt install ./dist/read-e_1.0.0_amd64.deb
+```
 
 ---
 
@@ -145,7 +166,8 @@ The compiled binary will be placed in the `build/bin/` directory.
 Read-e stores application state using embedded SQLite. The database schema includes:
 
 - `books`: Unique books identified by SHA-256 hash, title, author, cover path, total spine chapters, and timestamps.
-- `progress`: Active reading state per book (spine index, scroll position, and last read timestamp).
+- `progress`: Active reading state per book (spine index, scroll position, completed status, and last read timestamp).
+- `reading_sessions`: Daily reading logs capturing session date, active reading duration (seconds), and pages turned.
 - `settings`: Serialized JSON configuration for themes, typography, and layout preferences.
 - `highlights`: Text selections with color tags, spine chapter index, and attached notes.
 - `bookmarks`: Saved reading positions with chapter references, title labels, and precise vertical scroll offsets.

@@ -38,7 +38,7 @@ func (a *App) startup(ctx context.Context) {
 	if err != nil {
 		configDir = os.TempDir()
 	}
-	dbPath := filepath.Join(configDir, "epub-reader", "library.db")
+	dbPath := filepath.Join(configDir, "read-e", "library.db")
 
 	s, err := store.New(dbPath)
 	if err != nil {

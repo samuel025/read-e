@@ -1,0 +1,198 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Squircle Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E1B4B"/>
+      <stop offset="45%" stop-color="#2E1065"/>
+      <stop offset="80%" stop-color="#1E1B4B"/>
+      <stop offset="100%" stop-color="#0F172A"/>
+    </linearGradient>
+
+    <!-- Outer Rim Highlight -->
+    <linearGradient id="rimGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#A5B4FC" stop-opacity="0.6"/>
+      <stop offset="40%" stop-color="#818CF8" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#4F46E5" stop-opacity="0.05"/>
+    </linearGradient>
+
+    <!-- Ambient Glow inside Icon -->
+    <radialGradient id="centerAura" cx="50%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="#6366F1" stop-opacity="0.25"/>
+      <stop offset="70%" stop-color="#4338CA" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#1E1B4B" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Book Cover Gradient -->
+    <linearGradient id="coverGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5"/>
+      <stop offset="50%" stop-color="#4338CA"/>
+      <stop offset="100%" stop-color="#312E81"/>
+    </linearGradient>
+
+    <!-- Page Gradients -->
+    <linearGradient id="leftPageGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#CBD5E1"/>
+      <stop offset="12%" stop-color="#F8FAFC"/>
+      <stop offset="85%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#E2E8F0"/>
+    </linearGradient>
+
+    <linearGradient id="rightPageGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#E2E8F0"/>
+      <stop offset="15%" stop-color="#FFFFFF"/>
+      <stop offset="88%" stop-color="#F8FAFC"/>
+      <stop offset="100%" stop-color="#CBD5E1"/>
+    </linearGradient>
+
+    <!-- Page Thickness Shadows -->
+    <linearGradient id="underPageLeft" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#94A3B8"/>
+      <stop offset="100%" stop-color="#CBD5E1"/>
+    </linearGradient>
+
+    <linearGradient id="underPageRight" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#CBD5E1"/>
+      <stop offset="100%" stop-color="#94A3B8"/>
+    </linearGradient>
+
+    <!-- Bookmark Gradient -->
+    <linearGradient id="ribbonGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FB7185"/>
+      <stop offset="40%" stop-color="#F43F5E"/>
+      <stop offset="100%" stop-color="#E11D48"/>
+    </linearGradient>
+
+    <!-- Spine Shadow -->
+    <linearGradient id="spineCrease" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#64748B" stop-opacity="0.35"/>
+      <stop offset="50%" stop-color="#334155" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#64748B" stop-opacity="0.35"/>
+    </linearGradient>
+
+    <!-- Sparkle / Digital Magic Gradient -->
+    <linearGradient id="sparkleGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#67E8F9"/>
+      <stop offset="50%" stop-color="#38BDF8"/>
+      <stop offset="100%" stop-color="#818CF8"/>
+    </linearGradient>
+
+    <!-- Shadows -->
+    <filter id="shadowSquircle" x="-10%" y="-10%" width="120%" height="125%" filterUnits="userSpaceOnUse">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="16"/>
+      <feOffset dx="0" dy="14"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.45"/></feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="bookShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="14"/>
+      <feOffset dx="0" dy="12"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.4"/></feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="ribbonShadow" x="-30%" y="-10%" width="160%" height="130%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4"/>
+      <feOffset dx="1" dy="3"/>
+      <feComponentTransfer><feFuncA type="linear" slope="0.3"/></feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="glowSparkle" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="7"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Main Squircle Background -->
+  <g filter="url(#shadowSquircle)">
+    <rect x="32" y="32" width="448" height="448" rx="104" ry="104" fill="url(#bgGrad)"/>
+    <!-- Subtle Inner Border Highlight -->
+    <rect x="33" y="33" width="446" height="446" rx="103" ry="103" fill="none" stroke="url(#rimGrad)" stroke-width="2"/>
+    <!-- Center Ambient Glow -->
+    <rect x="32" y="32" width="448" height="448" rx="104" ry="104" fill="url(#centerAura)"/>
+  </g>
+
+  <!-- Ambient Light Reflection at Top of Squircle -->
+  <path d="M 136 34 C 80 34 50 65 37 116 C 58 100 100 88 160 84 C 235 79 330 84 416 110 C 445 76 415 34 376 34 Z" fill="#FFFFFF" opacity="0.05"/>
+
+  <!-- Book Container Group with Shadow -->
+  <g filter="url(#bookShadow)">
+    <!-- Book Hardcover Backing (Extended silhouette) -->
+    <path d="M 86 346 C 86 362 106 374 138 378 C 182 384 226 380 256 390 C 286 380 330 384 374 378 C 406 374 426 362 426 346 L 426 160 C 426 146 410 134 380 138 C 334 144 288 140 256 150 C 224 140 178 144 132 138 C 102 134 86 146 86 160 Z" fill="url(#coverGrad)" stroke="#6366F1" stroke-width="2.5" opacity="0.95"/>
+
+    <!-- Bottom Page Edge Stack (Layered depth) -->
+    <path d="M 100 346 C 146 350 206 348 256 366 C 242 354 188 344 100 342 Z" fill="url(#underPageLeft)"/>
+    <path d="M 412 346 C 366 350 306 348 256 366 C 270 354 324 344 412 342 Z" fill="url(#underPageRight)"/>
+
+    <path d="M 96 340 C 144 344 208 342 256 360 C 246 349 194 339 96 336 Z" fill="#F1F5F9"/>
+    <path d="M 416 340 C 368 344 304 342 256 360 C 266 349 318 339 416 336 Z" fill="#F1F5F9"/>
+
+    <!-- MAIN OPEN BOOK PAGES -->
+    <!-- Left Main Page -->
+    <path d="M 256 164 C 218 150 160 152 98 160 C 90 161 86 168 86 176 L 92 332 C 92 340 98 346 106 345 C 164 337 218 336 256 354 Z" fill="url(#leftPageGrad)"/>
+
+    <!-- Right Main Page -->
+    <path d="M 256 164 C 294 150 352 152 414 160 C 422 161 426 168 426 176 L 420 332 C 420 340 414 346 406 345 C 348 337 294 336 256 354 Z" fill="url(#rightPageGrad)"/>
+
+    <!-- Subtle Spine Crease Fold -->
+    <line x1="256" y1="164" x2="256" y2="352" stroke="#64748B" stroke-width="1.5" opacity="0.2"/>
+
+    <!-- Stylized Typographic Lines on Left Page -->
+    <g opacity="0.3" stroke="#4F46E5" stroke-linecap="round" stroke-width="4">
+      <line x1="126" y1="200" x2="228" y2="196"/>
+      <line x1="124" y1="220" x2="230" y2="216"/>
+      <line x1="122" y1="240" x2="226" y2="236"/>
+      <line x1="122" y1="260" x2="204" y2="256"/>
+      <line x1="120" y1="280" x2="224" y2="276"/>
+      <line x1="120" y1="300" x2="190" y2="296"/>
+    </g>
+
+    <!-- Stylized Typographic Lines on Right Page -->
+    <g opacity="0.3" stroke="#4F46E5" stroke-linecap="round" stroke-width="4">
+      <line x1="284" y1="196" x2="386" y2="200"/>
+      <line x1="282" y1="216" x2="388" y2="220"/>
+      <line x1="286" y1="236" x2="390" y2="240"/>
+      <line x1="286" y1="256" x2="368" y2="260"/>
+      <line x1="288" y1="276" x2="392" y2="280"/>
+      <line x1="288" y1="296" x2="352" y2="300"/>
+    </g>
+
+    <!-- Golden Chapter Initial Badge on Left Page -->
+    <rect x="122" y="192" width="22" height="22" rx="5" fill="#F59E0B" opacity="0.85"/>
+
+    <!-- Bookmark Ribbon Dropping with Filter Shadow -->
+    <g filter="url(#ribbonShadow)">
+      <path d="M 248 156 L 264 156 L 264 300 L 256 290 L 248 300 Z" fill="url(#ribbonGrad)"/>
+    </g>
+    <!-- Ribbon Tail Peeking from Bottom of Spine -->
+    <path d="M 249 350 L 263 350 L 263 390 L 256 382 L 249 390 Z" fill="url(#ribbonGrad)"/>
+  </g>
+
+  <!-- Glowing Digital Sparkle above the Book -->
+  <g filter="url(#glowSparkle)" transform="translate(256, 122)">
+    <!-- 4-pointed Star -->
+    <path d="M 0 -22 Q 0 0 22 0 Q 0 0 0 22 Q 0 0 -22 0 Q 0 0 0 -22 Z" fill="url(#sparkleGrad)"/>
+    <circle cx="0" cy="0" r="4.5" fill="#FFFFFF"/>
+  </g>
+
+  <!-- Minor Accent Sparkles -->
+  <g transform="translate(194, 110) scale(0.45)">
+    <path d="M 0 -16 Q 0 0 16 0 Q 0 0 0 16 Q 0 0 -16 0 Q 0 0 0 -16 Z" fill="#38BDF8" opacity="0.85"/>
+  </g>
+  <g transform="translate(324, 114) scale(0.35)">
+    <path d="M 0 -16 Q 0 0 16 0 Q 0 0 0 16 Q 0 0 -16 0 Q 0 0 0 -16 Z" fill="#A5B4FC" opacity="0.75"/>
+  </g>
+</svg>
