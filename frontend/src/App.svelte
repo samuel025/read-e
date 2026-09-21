@@ -1,9 +1,10 @@
 <script>
-  import { view } from './stores/app.js';
+  import { view, settingsOpen, searchOpen, library, settings } from './stores/app.js';
   import { getLibrary, getSettings } from './lib/api.js';
-  import { library, settings } from './stores/app.js';
   import LibraryView from './lib/LibraryView.svelte';
   import ReaderView from './lib/ReaderView.svelte';
+  import SettingsPanel from './lib/SettingsPanel.svelte';
+  import SearchModal from './lib/SearchModal.svelte';
   import { onMount } from 'svelte';
 
   onMount(async () => {
@@ -25,6 +26,14 @@
   <LibraryView />
 {:else}
   <ReaderView />
+{/if}
+
+{#if $settingsOpen}
+  <SettingsPanel />
+{/if}
+
+{#if $searchOpen}
+  <SearchModal />
 {/if}
 
 <style>

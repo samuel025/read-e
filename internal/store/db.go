@@ -80,6 +80,16 @@ func (s *Store) migrate() error {
 		FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_highlights_book ON highlights(book_id, spine_index);
+	CREATE TABLE IF NOT EXISTS bookmarks (
+		id TEXT PRIMARY KEY,
+		book_id TEXT NOT NULL,
+		spine_index INTEGER NOT NULL DEFAULT 0,
+		title TEXT NOT NULL DEFAULT '',
+		scroll_offset REAL NOT NULL DEFAULT 0.0,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_bookmarks_book ON bookmarks(book_id, spine_index);
 	`
 	_, err := s.db.Exec(schema)
 	return err
@@ -211,5 +221,55 @@ func (s *Store) GetHighlights(bookID string) ([]epub.Highlight, error) {
 
 func (s *Store) DeleteHighlight(id string) error {
 	_, err := s.db.Exec("DELETE FROM highlights WHERE id = ?", id)
+	return err
+}
+
+func (s *Store) UpdateHighlightNote(id string, note string) error {
+	_, err := s.db.Exec("UPDATE highlights SET note = ? WHERE id = ?", note, id)
+	return err
+}
+
+func (s *Store) SaveBookmark(b epub.Bookmark) error {
+	if b.CreatedAt.IsZero() {
+		b.CreatedAt = time.Now()
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO bookmarks (id, book_id, spine_index, title, scroll_offset, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			title = excluded.title,
+			scroll_offset = excluded.scroll_offset
+	`, b.ID, b.BookID, b.SpineIndex, b.Title, b.ScrollOffset, b.CreatedAt)
+	return err
+}
+
+func (s *Store) GetBookmarks(bookID string) ([]epub.Bookmark, error) {
+	rows, err := s.db.Query(`
+		SELECT id, book_id, spine_index, title, scroll_offset, created_at
+		FROM bookmarks
+		WHERE book_id = ?
+		ORDER BY spine_index ASC, created_at ASC
+	`, bookID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var bookmarks []epub.Bookmark
+	for rows.Next() {
+		var b epub.Bookmark
+		if err := rows.Scan(&b.ID, &b.BookID, &b.SpineIndex, &b.Title, &b.ScrollOffset, &b.CreatedAt); err != nil {
+			return nil, err
+		}
+		bookmarks = append(bookmarks, b)
+	}
+	if bookmarks == nil {
+		bookmarks = []epub.Bookmark{}
+	}
+	return bookmarks, rows.Err()
+}
+
+func (s *Store) DeleteBookmark(id string) error {
+	_, err := s.db.Exec("DELETE FROM bookmarks WHERE id = ?", id)
 	return err
 }

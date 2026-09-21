@@ -2,9 +2,13 @@
   import { onMount } from 'svelte';
   import {
     currentChapter, currentBookId, currentSpineIndex,
-    spineCount, settings, highlights
+    spineCount, settings, highlights, bookmarks, searchOpen
   } from '../stores/app.js';
-  import { getChapter, saveProgress, getProgress, addHighlight, deleteHighlight } from './api.js';
+  import {
+    getChapter, saveProgress, getProgress,
+    addHighlight, deleteHighlight, updateHighlightNote,
+    saveBookmark, deleteBookmark, getHighlights
+  } from './api.js';
 
   let iframeEl;
   let loading = false;
@@ -25,7 +29,50 @@
     }
   }
 
+  async function toggleCurrentBookmark() {
+    const bookId = $currentBookId;
+    const spineIdx = $currentSpineIndex;
+    if (!bookId) return;
+
+    const currentBm = $bookmarks.find(b => b.spineIndex === spineIdx);
+    if (currentBm) {
+      await deleteBookmark(currentBm.id);
+      bookmarks.update(items => items.filter(b => b.id !== currentBm.id));
+    } else {
+      const scrollY = iframeEl?.contentWindow?.scrollY || 0;
+      const newBm = {
+        id: crypto.randomUUID ? crypto.randomUUID() : 'bm_' + Date.now(),
+        bookId: bookId,
+        spineIndex: spineIdx,
+        title: `Chapter ${spineIdx + 1}`,
+        scrollOffset: scrollY,
+        createdAt: new Date().toISOString()
+      };
+      await saveBookmark(newBm);
+      bookmarks.update(items => [newBm, ...items]);
+    }
+  }
+
+  // Load highlights for book if not already loaded
+  $: if ($currentBookId) {
+    getHighlights($currentBookId).then((items) => {
+      highlights.set(items || []);
+    });
+  }
+
   $: themeCSS = buildThemeCSS($settings);
+
+  // NOTE: srcdoc does NOT depend on $highlights so highlighting does not reload the iframe!
+  $: srcdoc = buildSrcdoc($currentChapter, themeCSS, $currentBookId, $currentSpineIndex);
+
+  // Synchronize highlights to iframe whenever $highlights changes
+  $: if (iframeEl?.contentWindow && $currentBookId) {
+    const chHighlights = $highlights.filter(h => h.bookId === $currentBookId && h.spineIndex === $currentSpineIndex);
+    iframeEl.contentWindow.postMessage({
+      type: 'sync-highlights',
+      highlights: chHighlights
+    }, '*');
+  }
 
   function buildThemeCSS(s) {
     const themes = {
@@ -36,6 +83,9 @@
     };
     const t = themes[s.theme] || themes.dark;
     const isDark = s.theme === 'dark' || s.theme === 'nord';
+    const maxWidth = s.maxWidth || 780;
+    const lineHeight = s.lineHeight || 1.7;
+    const textAlign = s.textAlign || 'left';
 
     return `
       <style>
@@ -47,14 +97,16 @@
           color: ${t.fg};
           font-family: ${s.fontFamily || "'Inter', system-ui, sans-serif"};
           font-size: ${s.fontSize}em;
-          line-height: 1.7;
+          line-height: ${lineHeight};
+          text-align: ${textAlign};
+          ${textAlign === 'justify' ? 'hyphens: auto; -webkit-hyphens: auto; text-justify: inter-word;' : ''}
           word-wrap: break-word;
           overflow-wrap: break-word;
           -webkit-font-smoothing: antialiased;
         }
         body {
           padding: 32px 48px;
-          max-width: 800px;
+          max-width: ${maxWidth}px;
           margin: 0 auto;
         }
         img, svg, video {
@@ -128,104 +180,80 @@
           font-size: 0.82em !important;
           line-height: 1.55 !important;
           opacity: 0.88 !important;
-          margin-top: 0.35em !important;
-          margin-bottom: 0.65em !important;
+          margin-top: 0.4em !important;
+          margin-bottom: 0.4em !important;
         }
 
-        /* In-text footnote references (superscript in reading body) */
-        sup,
-        [class*="footnote-reference" i],
-        [class*="footnote-ref" i],
-        [class*="footnote_ref" i],
-        [class*="noteref" i],
-        [epub\\:type~="noteref"],
-        [role~="doc-noteref"],
-        a[href*="#footnote" i]:not(.reader-footnote a):not([class*="footnote-text" i] a),
-        a[href*="#fn" i]:not(.reader-footnote a):not([class*="footnote-text" i] a),
-        a[href*="#note" i]:not(.reader-footnote a):not([class*="footnote-text" i] a) {
-          font-size: 0.72em !important;
+        /* Footnote In-Text Reference Super / Link */
+        a[epub\\:type~="noteref"],
+        a[role~="doc-noteref"],
+        a[class*="noteref" i],
+        a[class*="footnote" i],
+        a[class*="endnote" i],
+        sup a,
+        a sup,
+        .reader-footnote-ref {
+          font-size: 0.75em !important;
+          line-height: 1 !important;
           vertical-align: super !important;
-          line-height: 0 !important;
-          font-weight: 600 !important;
           text-decoration: none !important;
-          padding: 0 0.15em;
-          opacity: 0.92;
-          cursor: pointer;
+          padding: 1px 4px !important;
+          margin: 0 1px !important;
+          border-radius: 3px !important;
+          color: ${t.link} !important;
+          font-weight: 600 !important;
+          transition: background-color 0.15s ease, color 0.15s ease;
         }
 
-        /* Number/anchor inside the footnote itself */
-        .footnotes a,
-        .endnotes a,
-        .reader-footnote a,
-        [class*="footnote-text" i] a,
-        [class*="footnote_text" i] a {
-          font-weight: 600 !important;
-          text-decoration: none !important;
-          margin-right: 0.35em !important;
-          font-size: 0.9em !important;
-          vertical-align: baseline !important;
+        a[epub\\:type~="noteref"]:hover,
+        a[role~="doc-noteref"]:hover,
+        a[class*="noteref" i]:hover,
+        sup a:hover,
+        a sup:hover,
+        .reader-footnote-ref:hover {
+          background-color: rgba(129, 140, 248, 0.18) !important;
         }
 
-        /* Footnote target highlight pulse */
-        @keyframes readerHighlight {
-          0% { background-color: ${t.highlight}; border-radius: 4px; }
-          100% { background-color: transparent; }
-        }
+        /* Animated Target Focus Highlight */
         .reader-target-highlight {
-          animation: readerHighlight 1.8s ease-out;
-          border-radius: 4px;
+          animation: readerTargetPulse 1.8s cubic-bezier(0.2, 0.8, 0.2, 1) forwards !important;
+          border-radius: 4px !important;
         }
 
-        /* Collapse empty blockquotes, empty paragraphs, and ghost spacers */
-        blockquote:empty,
-        p:empty,
-        div:empty {
-          display: none !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          border: none !important;
+        @keyframes readerTargetPulse {
+          0% {
+            background-color: rgba(129, 140, 248, 0.45);
+            outline: 2px solid rgba(129, 140, 248, 0.6);
+          }
+          70% {
+            background-color: rgba(129, 140, 248, 0.2);
+            outline: 2px solid rgba(129, 140, 248, 0.25);
+          }
+          100% {
+            background-color: transparent;
+            outline: 2px solid transparent;
+          }
         }
 
-        /* Table of Contents & Navigation List Spacing */
-        .toc,
-        .table-of-contents,
-        [epub\\:type~="toc"],
-        [role~="doc-toc"],
-        nav[class*="toc" i],
-        div[class*="toc" i],
-        section[class*="toc" i],
-        .reader-toc-page {
-          line-height: 1.45 !important;
-        }
-
-        .toc p,
-        .toc li,
-        .toc div,
-        [epub\\:type~="toc"] p,
-        [role~="doc-toc"] p,
-        [class*="toc" i] p,
-        .reader-toc-item,
+        /* Table of contents page styling */
         .reader-toc-page p,
-        .reader-toc-page div.calibre11 {
+        .reader-toc-page div.calibre11,
+        .reader-toc-page li,
+        .reader-toc-item {
           margin-top: 0.35em !important;
           margin-bottom: 0.35em !important;
           line-height: 1.45 !important;
         }
-
-        .toc a,
-        [class*="toc" i] a,
-        .reader-toc-item a,
-        .reader-toc-page a {
+        .reader-toc-page a,
+        .reader-toc-item a {
           text-decoration: none !important;
         }
-        .toc a:hover,
-        [class*="toc" i] a:hover,
-        .reader-toc-item a:hover,
-        .reader-toc-page a:hover {
+        .reader-toc-page a:hover,
+        .reader-toc-item a:hover {
           text-decoration: underline !important;
         }
 
-        /* Collapse artificial spacer divs from calibre / publishers */
+        /* Collapse artificial spacer divs */
         .reader-spacer-collapsed,
         .reader-toc-page .calibre16,
         .reader-toc-page .calibre10,
@@ -239,7 +267,7 @@
         /* ==================== MULTI-COLOR HIGHLIGHTING ==================== */
         mark.reader-highlight {
           border-radius: 3px;
-          padding: 1px 3px;
+          padding: 1px 2px;
           cursor: pointer;
           transition: filter 0.15s ease, box-shadow 0.15s ease;
           display: inline;
@@ -315,6 +343,23 @@
           margin: 0 2px;
         }
 
+        .reader-icon-btn {
+          background: transparent;
+          border: none;
+          color: ${isDark ? '#cbd5e1' : '#475569'};
+          cursor: pointer;
+          padding: 3px;
+          border-radius: 4px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: transform 0.12s ease, color 0.12s ease;
+        }
+        .reader-icon-btn:hover {
+          transform: scale(1.15);
+          color: ${t.link};
+        }
+
         .reader-delete-btn {
           background: transparent;
           border: none;
@@ -333,6 +378,138 @@
           opacity: 1;
         }
 
+        /* Floating Note Popover editor */
+        .reader-inline-note-box {
+          position: absolute;
+          z-index: 10001;
+          width: 260px;
+          padding: 10px;
+          background: ${isDark ? '#1a1e28' : '#ffffff'};
+          border: 1px solid ${isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)'};
+          border-radius: 10px;
+          box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          animation: menuPopIn 0.15s ease-out;
+        }
+        .reader-inline-note-box textarea {
+          width: 100%;
+          border: 1px solid ${isDark ? 'rgba(255,255,255,0.1)' : '#cbd5e1'};
+          background: ${isDark ? '#0f1117' : '#f8fafc'};
+          color: ${t.fg};
+          font-family: inherit;
+          font-size: 0.75rem;
+          padding: 6px;
+          border-radius: 6px;
+          resize: none;
+          outline: none;
+        }
+        .reader-inline-note-box .note-btn-row {
+          display: flex;
+          justify-content: flex-end;
+          gap: 4px;
+        }
+        .reader-inline-note-box button {
+          font-size: 0.6875rem;
+          padding: 3px 8px;
+          border-radius: 4px;
+          border: none;
+          cursor: pointer;
+        }
+        .reader-inline-note-box .btn-save-note {
+          background: ${t.link};
+          color: white;
+          font-weight: 600;
+        }
+
+        /* Footnote Floating Popover Card */
+        .reader-footnote-popover {
+          position: absolute;
+          z-index: 10002;
+          max-width: 400px;
+          min-width: 250px;
+          background: ${isDark ? '#1a1e28' : '#ffffff'};
+          color: ${t.fg};
+          border: 1px solid ${isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.14)'};
+          border-radius: 12px;
+          box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.1);
+          padding: 12px 14px;
+          font-size: 0.8125rem;
+          line-height: 1.5;
+          animation: popoverFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        @keyframes popoverFadeIn {
+          from { opacity: 0; transform: scale(0.95) translateY(4px); }
+          to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .reader-footnote-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 6px;
+          padding-bottom: 4px;
+          border-bottom: 1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'};
+        }
+        .reader-footnote-title {
+          font-size: 0.6875rem;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.04em;
+          color: ${t.link};
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+        .reader-footnote-close {
+          background: transparent;
+          border: none;
+          color: ${isDark ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.4)'};
+          cursor: pointer;
+          padding: 2px 5px;
+          border-radius: 4px;
+          font-size: 0.75rem;
+          line-height: 1;
+        }
+        .reader-footnote-close:hover {
+          background: ${isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)'};
+          color: ${t.fg};
+        }
+        .reader-footnote-body {
+          max-height: 220px;
+          overflow-y: auto;
+          font-size: 0.8125rem;
+          opacity: 0.95;
+        }
+        .reader-footnote-footer {
+          margin-top: 8px;
+          padding-top: 6px;
+          border-top: 1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'};
+          text-align: right;
+        }
+        .reader-footnote-jump {
+          font-size: 0.6875rem;
+          color: ${t.link};
+          text-decoration: none;
+          cursor: pointer;
+        }
+        .reader-footnote-jump:hover {
+          text-decoration: underline;
+        }
+
+        /* Search Match Pulse */
+        .reader-search-match {
+          background-color: rgba(245, 158, 11, 0.45);
+          box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
+          border-radius: 3px;
+          animation: searchMatchPulse 2.5s ease-out forwards;
+        }
+        @keyframes searchMatchPulse {
+          0% { transform: scale(1.05); background-color: rgba(245, 158, 11, 0.8); }
+          40% { transform: scale(1.02); background-color: rgba(245, 158, 11, 0.5); }
+          100% { transform: scale(1); background-color: rgba(245, 158, 11, 0.25); }
+        }
+
         @media (prefers-reduced-motion: reduce) {
           * { transition: none !important; animation: none !important; }
         }
@@ -342,10 +519,7 @@
     `;
   }
 
-  $: chapterHighlights = $highlights.filter(h => h.bookId === $currentBookId && h.spineIndex === $currentSpineIndex);
-  $: srcdoc = buildSrcdoc($currentChapter, themeCSS, chapterHighlights, $currentBookId, $currentSpineIndex);
-
-  function buildSrcdoc(chapter, css, highlightsList, bookId, spineIndex) {
+  function buildSrcdoc(chapter, css, bookId, spineIndex) {
     if (!chapter) return '';
 
     const script = `
@@ -353,7 +527,317 @@
         (function() {
           var bookId = ${JSON.stringify(bookId || '')};
           var spineIndex = ${spineIndex || 0};
-          var existingHighlights = ${JSON.stringify(highlightsList || [])};
+          var existingHighlights = [];
+
+          var activeMenu = null;
+          var activeFootnotePopover = null;
+          var activeNoteBox = null;
+
+          function removeMenu() {
+            if (activeMenu && activeMenu.parentNode) {
+              activeMenu.parentNode.removeChild(activeMenu);
+            }
+            activeMenu = null;
+          }
+
+          function removeFootnotePopover() {
+            if (activeFootnotePopover && activeFootnotePopover.parentNode) {
+              activeFootnotePopover.parentNode.removeChild(activeFootnotePopover);
+            }
+            activeFootnotePopover = null;
+          }
+
+          function removeNoteBox() {
+            if (activeNoteBox && activeNoteBox.parentNode) {
+              activeNoteBox.parentNode.removeChild(activeNoteBox);
+            }
+            activeNoteBox = null;
+          }
+
+          function isFootnoteLink(a, href) {
+            var epubType = (a.getAttribute('epub:type') || '').toLowerCase();
+            var role = (a.getAttribute('role') || '').toLowerCase();
+            var rel = (a.getAttribute('rel') || '').toLowerCase();
+            var cls = (a.className || '').toLowerCase();
+            var text = a.textContent.trim();
+            var lowerHref = (href || '').toLowerCase();
+
+            if (epubType === 'noteref' || role === 'doc-noteref' || rel.indexOf('footnote') !== -1) return true;
+            if (lowerHref.indexOf('footnote') !== -1 || lowerHref.indexOf('endnote') !== -1 || lowerHref.indexOf('fn') !== -1) return true;
+            if (cls.indexOf('footnote') !== -1 || cls.indexOf('noteref') !== -1) return true;
+            if (a.closest('sup') || a.querySelector('sup')) return true;
+            if (/^\\[?\\d+\\]?$/.test(text)) return true;
+            return false;
+          }
+
+          function showFootnotePopover(anchor, targetEl) {
+            removeFootnotePopover();
+            removeMenu();
+            removeNoteBox();
+
+            var clone = targetEl.cloneNode(true);
+            var backlinks = clone.querySelectorAll('a[href*="#"], .calibre, .calibre1');
+            for (var b = 0; b < backlinks.length; b++) {
+              var bt = backlinks[b].textContent.trim();
+              if (bt.match(/[↩^↑]/) || backlinks[b].getAttribute('role') === 'doc-backlink') {
+                backlinks[b].remove();
+              }
+            }
+            var noteHtml = clone.innerHTML.trim();
+
+            var popover = document.createElement('div');
+            popover.className = 'reader-footnote-popover';
+            popover.innerHTML = [
+              '<div class="reader-footnote-header">',
+              '  <span class="reader-footnote-title">',
+              '    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>',
+              '    Footnote',
+              '  </span>',
+              '  <button class="reader-footnote-close" title="Close">✕</button>',
+              '</div>',
+              '<div class="reader-footnote-body">' + noteHtml + '</div>',
+              '<div class="reader-footnote-footer">',
+              '  <a href="#" class="reader-footnote-jump">Jump to endnote ↓</a>',
+              '</div>'
+            ].join('');
+
+            popover.querySelector('.reader-footnote-close').addEventListener('click', function(e) {
+              e.stopPropagation();
+              removeFootnotePopover();
+            });
+
+            popover.querySelector('.reader-footnote-jump').addEventListener('click', function(e) {
+              e.preventDefault();
+              e.stopPropagation();
+              removeFootnotePopover();
+              targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              targetEl.classList.remove('reader-target-highlight');
+              void targetEl.offsetWidth;
+              targetEl.classList.add('reader-target-highlight');
+              setTimeout(function() {
+                targetEl.classList.remove('reader-target-highlight');
+              }, 1800);
+            });
+
+            document.body.appendChild(popover);
+            activeFootnotePopover = popover;
+
+            var rect = anchor.getBoundingClientRect();
+            var popWidth = Math.min(380, document.body.clientWidth - 24);
+            var left = rect.left + window.scrollX + (rect.width / 2) - (popWidth / 2);
+            left = Math.max(12, Math.min(left, document.body.clientWidth - popWidth - 12));
+
+            var top = rect.top + window.scrollY - popover.offsetHeight - 8;
+            if (top < window.scrollY + 10) {
+              top = rect.bottom + window.scrollY + 8;
+            }
+
+            popover.style.width = popWidth + 'px';
+            popover.style.top = top + 'px';
+            popover.style.left = left + 'px';
+          }
+
+          function getAllTextNodes(root) {
+            var nodes = [];
+            var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+              acceptNode: function(node) {
+                if (!node.nodeValue || !node.nodeValue.length) return NodeFilter.FILTER_REJECT;
+                var p = node.parentElement;
+                if (!p) return NodeFilter.FILTER_REJECT;
+                var tag = p.tagName;
+                if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return NodeFilter.FILTER_REJECT;
+                if (p.closest('.reader-selection-menu') || p.closest('.reader-footnote-popover') || p.closest('.reader-inline-note-box')) return NodeFilter.FILTER_REJECT;
+                return NodeFilter.FILTER_ACCEPT;
+              }
+            });
+            var n;
+            while (n = walker.nextNode()) nodes.push(n);
+            return nodes;
+          }
+
+          function wrapTextNodeRange(node, start, end, id, color) {
+            try {
+              var range = document.createRange();
+              range.setStart(node, start);
+              range.setEnd(node, end);
+              var mark = document.createElement('mark');
+              mark.className = 'reader-highlight reader-highlight-' + color;
+              mark.setAttribute('data-highlight-id', id);
+              mark.setAttribute('data-color', color);
+              var frag = range.extractContents();
+              mark.appendChild(frag);
+              range.insertNode(mark);
+            } catch (e) {
+              console.warn('wrapTextNodeRange error:', e);
+            }
+          }
+
+          function wrapAcrossNodes(nodeMap, startIdx, endIdx, id, color) {
+            if (startIdx >= endIdx || startIdx >= nodeMap.length) return;
+            endIdx = Math.min(endIdx, nodeMap.length);
+
+            var nodeSpans = [];
+            var currentNode = null;
+            var startOffset = 0;
+            var endOffset = 0;
+
+            for (var i = startIdx; i < endIdx; i++) {
+              var item = nodeMap[i];
+              if (item.node !== currentNode) {
+                if (currentNode) {
+                  nodeSpans.push({ node: currentNode, start: startOffset, end: endOffset });
+                }
+                currentNode = item.node;
+                startOffset = item.offset;
+                endOffset = item.offset + 1;
+              } else {
+                endOffset = item.offset + 1;
+              }
+            }
+            if (currentNode) {
+              nodeSpans.push({ node: currentNode, start: startOffset, end: endOffset });
+            }
+
+            for (var s = nodeSpans.length - 1; s >= 0; s--) {
+              var span = nodeSpans[s];
+              wrapTextNodeRange(span.node, span.start, span.end, id, color);
+            }
+          }
+
+          function highlightTextInDocument(h) {
+            var targetText = (h.text || '').trim();
+            if (!targetText) return;
+
+            var textNodes = getAllTextNodes(document.body);
+            if (!textNodes.length) return;
+
+            // Fast path: exact match in single text node
+            for (var i = 0; i < textNodes.length; i++) {
+              var node = textNodes[i];
+              if (node.parentElement && node.parentElement.classList.contains('reader-highlight')) continue;
+              var idx = node.nodeValue.indexOf(targetText);
+              if (idx !== -1) {
+                wrapTextNodeRange(node, idx, idx + targetText.length, h.id, h.color || 'yellow');
+                return;
+              }
+            }
+
+            // Multi-node path: continuous character mapping with whitespace normalization
+            var fullText = '';
+            var nodeMap = [];
+            for (var n = 0; n < textNodes.length; n++) {
+              var tNode = textNodes[n];
+              if (tNode.parentElement && tNode.parentElement.classList.contains('reader-highlight')) continue;
+              var val = tNode.nodeValue;
+              for (var o = 0; o < val.length; o++) {
+                nodeMap.push({ node: tNode, offset: o });
+                fullText += val[o];
+              }
+            }
+
+            var cleanTarget = targetText.replace(/\\s+/g, ' ');
+            var normFull = '';
+            var normToOrigMap = [];
+            var inSpace = false;
+            for (var c = 0; c < fullText.length; c++) {
+              var ch = fullText[c];
+              if (/\\s/.test(ch)) {
+                if (!inSpace) {
+                  normToOrigMap.push(c);
+                  normFull += ' ';
+                  inSpace = true;
+                }
+              } else {
+                normToOrigMap.push(c);
+                normFull += ch;
+                inSpace = false;
+              }
+            }
+
+            var foundIdx = normFull.indexOf(cleanTarget);
+            if (foundIdx === -1) {
+              foundIdx = normFull.toLowerCase().indexOf(cleanTarget.toLowerCase());
+            }
+
+            if (foundIdx !== -1) {
+              var origStart = normToOrigMap[foundIdx];
+              var origEndIdx = Math.min(foundIdx + cleanTarget.length - 1, normToOrigMap.length - 1);
+              var origEnd = normToOrigMap[origEndIdx] + 1;
+              wrapAcrossNodes(nodeMap, origStart, origEnd, h.id, h.color || 'yellow');
+            }
+          }
+
+          function restoreHighlights(list) {
+            if (!list || !list.length) return;
+            existingHighlights = list;
+            for (var i = 0; i < list.length; i++) {
+              var h = list[i];
+              if (!h || !h.text) continue;
+              if (document.querySelector('mark[data-highlight-id="' + h.id + '"]')) continue;
+              highlightTextInDocument(h);
+            }
+          }
+
+          function scrollToText(text) {
+            if (!text) return false;
+            var cleanTarget = text.trim().replace(/\\s+/g, ' ').toLowerCase();
+            var sample = cleanTarget.substring(0, Math.min(32, cleanTarget.length));
+            var nodes = getAllTextNodes(document.body);
+            for (var i = 0; i < nodes.length; i++) {
+              var val = nodes[i].nodeValue.replace(/\\s+/g, ' ').toLowerCase();
+              if (val.indexOf(sample) !== -1) {
+                var el = nodes[i].parentElement || nodes[i];
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.classList.remove('reader-target-highlight');
+                void el.offsetWidth;
+                el.classList.add('reader-target-highlight');
+                setTimeout(function() {
+                  el.classList.remove('reader-target-highlight');
+                }, 2000);
+                return true;
+              }
+            }
+            return false;
+          }
+
+          function jumpToHighlightWithRetry(highlightId, targetText, retries) {
+            var mark = document.querySelector('mark[data-highlight-id="' + highlightId + '"]');
+            if (mark) {
+              mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              mark.classList.remove('reader-target-highlight');
+              void mark.offsetWidth;
+              mark.classList.add('reader-target-highlight');
+              setTimeout(function() {
+                mark.classList.remove('reader-target-highlight');
+              }, 2000);
+              return;
+            }
+
+            if (targetText && scrollToText(targetText)) {
+              return;
+            }
+
+            if ((retries || 0) < 6) {
+              setTimeout(function() {
+                jumpToHighlightWithRetry(highlightId, targetText, (retries || 0) + 1);
+              }, 120);
+            }
+          }
+
+          function scrollToOffsetWithRetry(offset, retries) {
+            var target = Math.max(0, offset || 0);
+            window.scrollTo({ top: target, behavior: 'smooth' });
+            if (document.documentElement) document.documentElement.scrollTop = target;
+            if (document.body) document.body.scrollTop = target;
+            if ((retries || 0) < 6) {
+              setTimeout(function() {
+                var curr = window.scrollY || (document.documentElement ? document.documentElement.scrollTop : 0) || (document.body ? document.body.scrollTop : 0) || 0;
+                if (target > 10 && Math.abs(curr - target) > 30) {
+                  scrollToOffsetWithRetry(target, (retries || 0) + 1);
+                }
+              }, 120);
+            }
+          }
 
           function setupContentEnhancements() {
             try {
@@ -416,33 +900,7 @@
                 }
               }
 
-              // 4. Footnote backlinks and reference targets
-              var links = document.querySelectorAll('a[href*="#"]');
-              for (var i = 0; i < links.length; i++) {
-                var href = links[i].getAttribute('href') || '';
-                var hashIdx = href.indexOf('#');
-                if (hashIdx === -1) continue;
-                var hash = href.substring(hashIdx + 1);
-                if (!hash) continue;
-
-                var lowerHref = href.toLowerCase();
-                if (lowerHref.indexOf('footnote') !== -1 || lowerHref.indexOf('endnote') !== -1 || lowerHref.indexOf('fn') !== -1) {
-                  var target = document.getElementById(hash) || document.querySelector('[name="' + CSS.escape(hash) + '"]');
-                  if (target) {
-                    var block = target.closest('p, li, .calibre1, [class*="footnote" i]') || target;
-                    block.classList.add('reader-footnote');
-                  }
-                }
-              }
-
-              var containers = document.querySelectorAll('[class*="footnote" i], [class*="endnote" i], [id*="footnote" i], [id*="endnote" i]');
-              for (var j = 0; j < containers.length; j++) {
-                var tag = containers[j].tagName;
-                if (tag === 'DIV' || tag === 'SECTION' || tag === 'ASIDE' || tag === 'OL' || tag === 'UL') {
-                  containers[j].classList.add('reader-footnotes-container');
-                }
-              }
-
+              // 4. Intercept Footnotes for In-Place Popovers
               document.addEventListener('click', function(e) {
                 var a = e.target.closest('a');
                 if (!a) return;
@@ -453,7 +911,15 @@
                 if (!hash) return;
 
                 var target = document.getElementById(hash) || document.querySelector('[name="' + CSS.escape(hash) + '"]');
-                if (target) {
+                if (!target) return;
+
+                var noteBlock = target.closest('li, p, div.calibre1, [class*="footnote" i], [class*="endnote" i]') || target;
+
+                if (isFootnoteLink(a, href)) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  showFootnotePopover(a, noteBlock);
+                } else {
                   e.preventDefault();
                   target.scrollIntoView({ behavior: 'smooth', block: 'center' });
                   target.classList.remove('reader-target-highlight');
@@ -465,70 +931,87 @@
                 }
               });
 
-              // 5. Restore saved highlights
-              restoreHighlights(existingHighlights);
+              // Dismiss popover on click outside or scroll
+              document.addEventListener('mousedown', function(e) {
+                if (activeFootnotePopover && !activeFootnotePopover.contains(e.target) && !e.target.closest('a')) {
+                  removeFootnotePopover();
+                }
+                if (activeNoteBox && !activeNoteBox.contains(e.target)) {
+                  removeNoteBox();
+                }
+              });
 
-              // 6. Setup text selection toolbar
+              window.addEventListener('scroll', function() {
+                if (activeFootnotePopover) removeFootnotePopover();
+                if (activeMenu) removeMenu();
+                if (activeNoteBox) removeNoteBox();
+              }, { passive: true });
+
+              // Keyboard shortcuts inside iframe
+              window.addEventListener('keydown', function(e) {
+                if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+                  e.preventDefault();
+                  window.parent.postMessage({ type: 'open-search-shortcut' }, '*');
+                } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
+                  e.preventDefault();
+                  window.parent.postMessage({ type: 'toggle-bookmark-shortcut' }, '*');
+                }
+              });
+
+              // Setup text selection toolbar
               setupSelectionToolbar();
+
+              // Tell parent we are ready to receive highlights
+              window.parent.postMessage({ type: 'request-highlights' }, '*');
 
             } catch (err) {
               console.warn('content enhancements error:', err);
             }
           }
 
-          function restoreHighlights(list) {
-            if (!list || !list.length) return;
-
-            list.forEach(function(h) {
-              if (document.querySelector('mark[data-highlight-id="' + h.id + '"]')) return;
-              if (!h.text) return;
-
-              wrapTextMatch(h);
-            });
-          }
-
-          function wrapTextMatch(h) {
-            var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
-            var node;
-            var candidates = [];
-            while (node = walker.nextNode()) {
-              if (node.parentElement && (node.parentElement.classList.contains('reader-highlight') || node.parentElement.closest('.reader-selection-menu'))) {
-                continue;
-              }
-              var val = node.nodeValue;
-              var pos = val.indexOf(h.text);
-              if (pos !== -1) {
-                candidates.push({ node: node, pos: pos });
-              }
-            }
-
-            for (var c = 0; c < candidates.length; c++) {
-              var cand = candidates[c];
-              try {
-                var range = document.createRange();
-                range.setStart(cand.node, cand.pos);
-                range.setEnd(cand.node, cand.pos + h.text.length);
-
+          function wrapRangeWithMark(range, id, color) {
+            try {
+              if (range.startContainer === range.endContainer && range.startContainer.nodeType === Node.TEXT_NODE) {
                 var mark = document.createElement('mark');
-                mark.className = 'reader-highlight reader-highlight-' + (h.color || 'yellow');
-                mark.setAttribute('data-highlight-id', h.id);
-                mark.setAttribute('data-color', h.color || 'yellow');
-
+                mark.className = 'reader-highlight reader-highlight-' + color;
+                mark.setAttribute('data-highlight-id', id);
+                mark.setAttribute('data-color', color);
                 var frag = range.extractContents();
                 mark.appendChild(frag);
                 range.insertNode(mark);
-                return;
-              } catch (e) {}
-            }
-          }
+                return true;
+              }
 
-          var activeMenu = null;
+              var commonAncestor = range.commonAncestorContainer;
+              var walker = document.createTreeWalker(
+                commonAncestor.nodeType === Node.TEXT_NODE ? commonAncestor.parentElement : commonAncestor,
+                NodeFilter.SHOW_TEXT,
+                null,
+                false
+              );
+              var textNodes = [];
+              var curr;
+              while (curr = walker.nextNode()) {
+                if (range.intersectsNode(curr)) {
+                  textNodes.push(curr);
+                }
+              }
 
-          function removeMenu() {
-            if (activeMenu && activeMenu.parentNode) {
-              activeMenu.parentNode.removeChild(activeMenu);
+              if (!textNodes.length) return false;
+
+              for (var i = textNodes.length - 1; i >= 0; i--) {
+                var node = textNodes[i];
+                var start = (node === range.startContainer) ? range.startOffset : 0;
+                var end = (node === range.endContainer) ? range.endOffset : node.nodeValue.length;
+                if (start < end) {
+                  wrapTextNodeRange(node, start, end, id, color);
+                }
+              }
+              return true;
+            } catch (err) {
+              console.warn('wrapRangeWithMark error:', err);
+              return false;
             }
-            activeMenu = null;
           }
 
           function setupSelectionToolbar() {
@@ -542,19 +1025,16 @@
 
             function handleSelectionEnd() {
               var sel = window.getSelection();
-              if (!sel || sel.isCollapsed) {
-                return;
-              }
+              if (!sel || sel.isCollapsed) return;
               var selectedText = sel.toString().trim();
-              if (!selectedText) {
-                return;
-              }
+              if (!selectedText) return;
 
               var range = sel.getRangeAt(0);
               var rect = range.getBoundingClientRect();
               if (rect.width === 0 && rect.height === 0) return;
 
               removeMenu();
+              removeFootnotePopover();
 
               var menu = document.createElement('div');
               menu.className = 'reader-selection-menu';
@@ -591,7 +1071,7 @@
             }
 
             document.addEventListener('mouseup', function(e) {
-              if (e.target.closest('.reader-selection-menu')) return;
+              if (e.target.closest('.reader-selection-menu') || e.target.closest('.reader-inline-note-box')) return;
               setTimeout(handleSelectionEnd, 30);
             });
 
@@ -614,6 +1094,8 @@
               var rect = mark.getBoundingClientRect();
 
               removeMenu();
+              removeFootnotePopover();
+              removeNoteBox();
 
               var menu = document.createElement('div');
               menu.className = 'reader-selection-menu';
@@ -630,8 +1112,12 @@
                   ev.preventDefault();
                   ev.stopPropagation();
 
-                  mark.className = 'reader-highlight reader-highlight-' + c.id;
-                  mark.setAttribute('data-color', c.id);
+                  var allMarks = document.querySelectorAll('mark[data-highlight-id="' + highlightId + '"]');
+                  for (var m = 0; m < allMarks.length; m++) {
+                    allMarks[m].className = 'reader-highlight reader-highlight-' + c.id;
+                    allMarks[m].setAttribute('data-color', c.id);
+                  }
+
                   window.parent.postMessage({
                     type: 'update-highlight',
                     highlightId: highlightId,
@@ -642,9 +1128,27 @@
                 menu.appendChild(btn);
               });
 
-              var divider = document.createElement('div');
-              divider.className = 'reader-menu-divider';
-              menu.appendChild(divider);
+              var divider1 = document.createElement('div');
+              divider1.className = 'reader-menu-divider';
+              menu.appendChild(divider1);
+
+              // Note button
+              var noteBtn = document.createElement('button');
+              noteBtn.className = 'reader-icon-btn';
+              noteBtn.title = 'Add note';
+              noteBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
+              noteBtn.addEventListener('mousedown', function(ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+
+                showNoteEditor(mark, highlightId);
+                removeMenu();
+              });
+              menu.appendChild(noteBtn);
+
+              var divider2 = document.createElement('div');
+              divider2.className = 'reader-menu-divider';
+              menu.appendChild(divider2);
 
               var delBtn = document.createElement('button');
               delBtn.className = 'reader-delete-btn';
@@ -654,11 +1158,15 @@
                 ev.preventDefault();
                 ev.stopPropagation();
 
-                var parent = mark.parentNode;
-                while (mark.firstChild) {
-                  parent.insertBefore(mark.firstChild, mark);
+                var allMarks = document.querySelectorAll('mark[data-highlight-id="' + highlightId + '"]');
+                for (var m = 0; m < allMarks.length; m++) {
+                  var mEl = allMarks[m];
+                  var parent = mEl.parentNode;
+                  while (mEl.firstChild) {
+                    parent.insertBefore(mEl.firstChild, mEl);
+                  }
+                  parent.removeChild(mEl);
                 }
-                parent.removeChild(mark);
 
                 window.parent.postMessage({
                   type: 'delete-highlight',
@@ -671,7 +1179,7 @@
               document.body.appendChild(menu);
               activeMenu = menu;
 
-              var menuWidth = 195;
+              var menuWidth = 230;
               var top = rect.top + window.scrollY - 44;
               if (top < window.scrollY + 10) {
                 top = rect.bottom + window.scrollY + 8;
@@ -684,20 +1192,68 @@
             });
           }
 
+          function showNoteEditor(mark, highlightId) {
+            removeNoteBox();
+
+            var currentNote = '';
+            for (var i = 0; i < existingHighlights.length; i++) {
+              if (existingHighlights[i].id === highlightId) {
+                currentNote = existingHighlights[i].note || '';
+                break;
+              }
+            }
+
+            var rect = mark.getBoundingClientRect();
+            var box = document.createElement('div');
+            box.className = 'reader-inline-note-box';
+            box.innerHTML = [
+              '<textarea rows="3" placeholder="Add a note...">' + (currentNote || '') + '</textarea>',
+              '<div class="note-btn-row">',
+              '  <button class="btn-cancel-note">Cancel</button>',
+              '  <button class="btn-save-note">Save</button>',
+              '</div>'
+            ].join('');
+
+            box.querySelector('.btn-cancel-note').addEventListener('click', function(e) {
+              e.stopPropagation();
+              removeNoteBox();
+            });
+
+            box.querySelector('.btn-save-note').addEventListener('click', function(e) {
+              e.stopPropagation();
+              var txt = box.querySelector('textarea').value.trim();
+              for (var i = 0; i < existingHighlights.length; i++) {
+                if (existingHighlights[i].id === highlightId) {
+                  existingHighlights[i].note = txt;
+                  break;
+                }
+              }
+              window.parent.postMessage({
+                type: 'save-highlight-note',
+                highlightId: highlightId,
+                note: txt
+              }, '*');
+              removeNoteBox();
+            });
+
+            document.body.appendChild(box);
+            activeNoteBox = box;
+
+            var top = rect.bottom + window.scrollY + 8;
+            var left = rect.left + window.scrollX;
+            left = Math.max(12, Math.min(left, document.body.clientWidth - 272));
+
+            box.style.top = top + 'px';
+            box.style.left = left + 'px';
+            box.querySelector('textarea').focus();
+          }
+
           function createHighlightFromRange(range, text, color) {
             var id = 'hl-' + Date.now() + '-' + Math.random().toString(36).substr(2, 6);
 
-            var mark = document.createElement('mark');
-            mark.className = 'reader-highlight reader-highlight-' + color;
-            mark.setAttribute('data-highlight-id', id);
-            mark.setAttribute('data-color', color);
-
-            try {
-              var frag = range.extractContents();
-              mark.appendChild(frag);
-              range.insertNode(mark);
-            } catch (e) {
-              return;
+            var wrapped = wrapRangeWithMark(range, id, color);
+            if (!wrapped) {
+              highlightTextInDocument({ id: id, text: text, color: color });
             }
 
             var highlightData = {
@@ -706,8 +1262,11 @@
               spineIndex: spineIndex,
               text: text,
               color: color,
+              note: '',
               createdAt: new Date().toISOString()
             };
+
+            existingHighlights.push(highlightData);
 
             window.parent.postMessage({
               type: 'create-highlight',
@@ -719,25 +1278,55 @@
           window.addEventListener('message', function(e) {
             if (!e.data || !e.data.type) return;
 
-            if (e.data.type === 'jump-to-highlight') {
-              var mark = document.querySelector('mark[data-highlight-id="' + e.data.highlightId + '"]');
-              if (mark) {
-                mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                mark.classList.remove('reader-target-highlight');
-                void mark.offsetWidth;
-                mark.classList.add('reader-target-highlight');
-                setTimeout(function() {
-                  mark.classList.remove('reader-target-highlight');
-                }, 2000);
-              }
+            if (e.data.type === 'sync-highlights') {
+              restoreHighlights(e.data.highlights || []);
+            } else if (e.data.type === 'jump-to-highlight') {
+              jumpToHighlightWithRetry(e.data.highlightId, e.data.text, 0);
+            } else if (e.data.type === 'scroll-to-offset') {
+              scrollToOffsetWithRetry(e.data.offset, 0);
             } else if (e.data.type === 'remove-highlight-mark') {
-              var markToRemove = document.querySelector('mark[data-highlight-id="' + e.data.highlightId + '"]');
-              if (markToRemove) {
-                var parent = markToRemove.parentNode;
-                while (markToRemove.firstChild) {
-                  parent.insertBefore(markToRemove.firstChild, markToRemove);
+              var allMarks = document.querySelectorAll('mark[data-highlight-id="' + e.data.highlightId + '"]');
+              for (var m = 0; m < allMarks.length; m++) {
+                var mEl = allMarks[m];
+                var parent = mEl.parentNode;
+                while (mEl.firstChild) {
+                  parent.insertBefore(mEl.firstChild, mEl);
                 }
-                parent.removeChild(markToRemove);
+                parent.removeChild(mEl);
+              }
+            } else if (e.data.type === 'find-and-scroll') {
+              var query = (e.data.query || '').trim().toLowerCase();
+              if (!query) return;
+
+              var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+              var node;
+              while (node = walker.nextNode()) {
+                if (node.parentElement && node.parentElement.tagName === 'SCRIPT') continue;
+                var val = node.nodeValue || '';
+                var idx = val.toLowerCase().indexOf(query);
+                if (idx !== -1) {
+                  var span = document.createElement('span');
+                  span.className = 'reader-search-match';
+                  var range = document.createRange();
+                  range.setStart(node, idx);
+                  range.setEnd(node, idx + query.length);
+                  var frag = range.extractContents();
+                  span.appendChild(frag);
+                  range.insertNode(span);
+
+                  span.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+                  setTimeout(function() {
+                    if (span.parentNode) {
+                      var p = span.parentNode;
+                      while (span.firstChild) {
+                        p.insertBefore(span.firstChild, span);
+                      }
+                      p.removeChild(span);
+                    }
+                  }, 4000);
+                  break;
+                }
               }
             }
           });
@@ -765,6 +1354,12 @@
     } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
       e.preventDefault();
       navigate(-1);
+    } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+      e.preventDefault();
+      searchOpen.set(true);
+    } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
+      e.preventDefault();
+      toggleCurrentBookmark();
     }
   }
 
@@ -789,6 +1384,22 @@
       const { highlightId } = e.data;
       deleteHighlight(highlightId);
       highlights.update(items => items.filter(h => h.id !== highlightId));
+    } else if (e.data.type === 'save-highlight-note') {
+      const { highlightId, note } = e.data;
+      updateHighlightNote(highlightId, note);
+      highlights.update(items => items.map(h => h.id === highlightId ? { ...h, note } : h));
+    } else if (e.data.type === 'request-highlights') {
+      if (iframeEl?.contentWindow && $currentBookId) {
+        const chHighlights = $highlights.filter(h => h.bookId === $currentBookId && h.spineIndex === $currentSpineIndex);
+        iframeEl.contentWindow.postMessage({
+          type: 'sync-highlights',
+          highlights: chHighlights
+        }, '*');
+      }
+    } else if (e.data.type === 'open-search-shortcut') {
+      searchOpen.set(true);
+    } else if (e.data.type === 'toggle-bookmark-shortcut') {
+      toggleCurrentBookmark();
     }
   }
 
@@ -804,11 +1415,21 @@
   function handleIframeLoad() {
     if (!iframeEl?.contentWindow) return;
 
+    // Restore scroll position
     getProgress($currentBookId).then((pos) => {
       if (pos?.scrollOffset && iframeEl?.contentWindow) {
         iframeEl.contentWindow.scrollTo(0, pos.scrollOffset);
       }
     });
+
+    // Send highlights to newly loaded iframe
+    if ($currentBookId) {
+      const chHighlights = $highlights.filter(h => h.bookId === $currentBookId && h.spineIndex === $currentSpineIndex);
+      iframeEl.contentWindow.postMessage({
+        type: 'sync-highlights',
+        highlights: chHighlights
+      }, '*');
+    }
 
     const interval = setInterval(() => {
       if (iframeEl?.contentWindow) {

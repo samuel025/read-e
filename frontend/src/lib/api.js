@@ -110,3 +110,39 @@ export async function deleteHighlight(id) {
   if (!go) return;
   return go.DeleteHighlight(id);
 }
+
+export async function updateHighlightNote(id, note) {
+  const go = getGoBinding();
+  if (!go) return;
+  return go.UpdateHighlightNote(id, note);
+}
+
+export async function saveBookmark(bookmark) {
+  const go = getGoBinding();
+  if (!go) return;
+  return go.SaveBookmark(bookmark);
+}
+
+export async function getBookmarks(bookID) {
+  const go = getGoBinding();
+  if (!go) return [];
+  return go.GetBookmarks(bookID);
+}
+
+export async function deleteBookmark(id) {
+  const go = getGoBinding();
+  if (!go) return;
+  return go.DeleteBookmark(id);
+}
+
+export async function searchBook(bookID, query) {
+  const go = getGoBinding();
+  if (!go) return [];
+  return go.SearchBook(bookID, query);
+}
+
+export async function getChapterWordCount(bookID, spineIndex) {
+  const go = getGoBinding();
+  if (!go) return 0;
+  return go.GetChapterWordCount(bookID, spineIndex);
+}

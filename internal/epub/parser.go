@@ -578,3 +578,141 @@ func extractTextContent(s string) string {
 	}
 	return strings.TrimSpace(s[:end])
 }
+
+func (r *Reader) ChapterWordCount(spineIndex int) int {
+	if spineIndex < 0 || spineIndex >= len(r.spine) {
+		return 0
+	}
+	fullPath := r.resolvePath(r.spine[spineIndex].Href)
+	data, err := r.readFile(fullPath)
+	if err != nil {
+		return 0
+	}
+	plainText := stripHTML(string(data))
+	return len(strings.Fields(plainText))
+}
+
+func (r *Reader) Search(query string) []SearchResult {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return []SearchResult{}
+	}
+
+	lowerQuery := strings.ToLower(query)
+	var results []SearchResult
+
+	for idx, item := range r.spine {
+		fullPath := r.resolvePath(item.Href)
+		data, err := r.readFile(fullPath)
+		if err != nil {
+			continue
+		}
+
+		plainText := stripHTML(string(data))
+		lowerText := strings.ToLower(plainText)
+
+		pos := 0
+		matchCount := 0
+		var firstSnippet string
+
+		for {
+			matchIdx := strings.Index(lowerText[pos:], lowerQuery)
+			if matchIdx == -1 {
+				break
+			}
+			absIdx := pos + matchIdx
+			matchCount++
+
+			if firstSnippet == "" {
+				start := absIdx - 40
+				if start < 0 {
+					start = 0
+				}
+				end := absIdx + len(query) + 40
+				if end > len(plainText) {
+					end = len(plainText)
+				}
+				snippet := plainText[start:end]
+				if start > 0 {
+					snippet = "…" + snippet
+				}
+				if end < len(plainText) {
+					snippet = snippet + "…"
+				}
+				firstSnippet = snippet
+			}
+
+			pos = absIdx + len(lowerQuery)
+			if pos >= len(lowerText) {
+				break
+			}
+		}
+
+		if matchCount > 0 {
+			chTitle := r.getChapterTitle(idx)
+			results = append(results, SearchResult{
+				SpineIndex:   idx,
+				ChapterTitle: chTitle,
+				Snippet:      firstSnippet,
+				MatchCount:   matchCount,
+			})
+		}
+	}
+
+	if results == nil {
+		results = []SearchResult{}
+	}
+	return results
+}
+
+func (r *Reader) getChapterTitle(spineIndex int) string {
+	var findInTOC func(entries []TOCEntry) string
+	findInTOC = func(entries []TOCEntry) string {
+		for _, e := range entries {
+			if e.SpineIndex == spineIndex && e.Title != "" {
+				return e.Title
+			}
+			if len(e.Children) > 0 {
+				if t := findInTOC(e.Children); t != "" {
+					return t
+				}
+			}
+		}
+		return ""
+	}
+
+	if t := findInTOC(r.toc); t != "" {
+		return t
+	}
+	return fmt.Sprintf("Chapter %d", spineIndex+1)
+}
+
+func stripHTML(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	inTag := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '<' {
+			inTag = true
+			continue
+		}
+		if c == '>' {
+			inTag = false
+			b.WriteByte(' ')
+			continue
+		}
+		if !inTag {
+			b.WriteByte(c)
+		}
+	}
+	res := b.String()
+	res = strings.ReplaceAll(res, "&nbsp;", " ")
+	res = strings.ReplaceAll(res, "&#160;", " ")
+	res = strings.ReplaceAll(res, "&amp;", "&")
+	res = strings.ReplaceAll(res, "&lt;", "<")
+	res = strings.ReplaceAll(res, "&gt;", ">")
+	res = strings.ReplaceAll(res, "&quot;", "\"")
+	res = strings.ReplaceAll(res, "&apos;", "'")
+	return strings.Join(strings.Fields(res), " ")
+}

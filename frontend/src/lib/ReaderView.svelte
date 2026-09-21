@@ -2,7 +2,17 @@
   import Toolbar from './Toolbar.svelte';
   import TOCSidebar from './TOCSidebar.svelte';
   import ChapterPane from './ChapterPane.svelte';
-  import { tocOpen } from '../stores/app.js';
+  import { tocOpen, currentBookId, highlights, bookmarks } from '../stores/app.js';
+  import { getHighlights, getBookmarks } from './api.js';
+
+  $: if ($currentBookId) {
+    getHighlights($currentBookId).then((items) => {
+      highlights.set(items || []);
+    });
+    getBookmarks($currentBookId).then((items) => {
+      bookmarks.set(items || []);
+    });
+  }
 </script>
 
 <div class="reader-view">

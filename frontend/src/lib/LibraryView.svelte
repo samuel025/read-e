@@ -2,7 +2,6 @@
   import { library, libraryLoading, settings, settingsOpen } from '../stores/app.js';
   import { scanLibrary, addBook, selectFolder, selectFile, getLibrary, removeBook } from './api.js';
   import BookCard from './BookCard.svelte';
-  import SettingsPanel from './SettingsPanel.svelte';
 
   let searchQuery = '';
 
@@ -145,9 +144,7 @@
   </main>
 </div>
 
-{#if $settingsOpen}
-  <SettingsPanel />
-{/if}
+
 
 <style>
   .library-view {

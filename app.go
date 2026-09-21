@@ -162,6 +162,38 @@ func (a *App) DeleteHighlight(id string) error {
 	return a.store.DeleteHighlight(id)
 }
 
+func (a *App) UpdateHighlightNote(id string, note string) error {
+	return a.store.UpdateHighlightNote(id, note)
+}
+
+func (a *App) SaveBookmark(b epub.Bookmark) error {
+	return a.store.SaveBookmark(b)
+}
+
+func (a *App) GetBookmarks(bookID string) ([]epub.Bookmark, error) {
+	return a.store.GetBookmarks(bookID)
+}
+
+func (a *App) DeleteBookmark(id string) error {
+	return a.store.DeleteBookmark(id)
+}
+
+func (a *App) SearchBook(bookID string, query string) ([]epub.SearchResult, error) {
+	reader, err := a.getReader(bookID)
+	if err != nil {
+		return nil, err
+	}
+	return reader.Search(query), nil
+}
+
+func (a *App) GetChapterWordCount(bookID string, spineIndex int) (int, error) {
+	reader, err := a.getReader(bookID)
+	if err != nil {
+		return 0, err
+	}
+	return reader.ChapterWordCount(spineIndex), nil
+}
+
 func (a *App) SaveSettings(settings epub.AppSettings) error {
 	data, err := json.Marshal(settings)
 	if err != nil {
@@ -177,10 +209,22 @@ func (a *App) GetSettings() epub.AppSettings {
 			Theme:      "dark",
 			FontSize:   1.0,
 			FontFamily: "'Inter', system-ui, sans-serif",
+			MaxWidth:   780,
+			LineHeight: 1.7,
+			TextAlign:  "left",
 		}
 	}
 	var s epub.AppSettings
 	json.Unmarshal([]byte(val), &s)
+	if s.MaxWidth == 0 {
+		s.MaxWidth = 780
+	}
+	if s.LineHeight == 0 {
+		s.LineHeight = 1.7
+	}
+	if s.TextAlign == "" {
+		s.TextAlign = "left"
+	}
 	return s
 }
 

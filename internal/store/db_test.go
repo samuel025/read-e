@@ -149,6 +149,42 @@ func TestStore(t *testing.T) {
 			t.Errorf("expected updated color 'green', got %q", highlights[0].Color)
 		}
 
+		// Update highlight note
+		if err := st.UpdateHighlightNote("hl-2", "Interesting reflection"); err != nil {
+			t.Fatalf("failed to update highlight note: %v", err)
+		}
+		highlights, _ = st.GetHighlights("book-123")
+		var foundNote string
+		for _, h := range highlights {
+			if h.ID == "hl-2" {
+				foundNote = h.Note
+			}
+		}
+		if foundNote != "Interesting reflection" {
+			t.Errorf("expected note 'Interesting reflection', got %q", foundNote)
+		}
+
+		// Bookmarks test
+		bm := epub.Bookmark{
+			ID:           "bm-1",
+			BookID:       "book-123",
+			SpineIndex:   2,
+			Title:        "Important Section",
+			ScrollOffset: 320.0,
+			CreatedAt:    time.Now(),
+		}
+		if err := st.SaveBookmark(bm); err != nil {
+			t.Fatalf("failed to save bookmark: %v", err)
+		}
+
+		bookmarks, err := st.GetBookmarks("book-123")
+		if err != nil {
+			t.Fatalf("failed to get bookmarks: %v", err)
+		}
+		if len(bookmarks) != 1 || bookmarks[0].Title != "Important Section" {
+			t.Fatalf("unexpected bookmarks: %+v", bookmarks)
+		}
+
 		// Delete a highlight
 		if err := st.DeleteHighlight("hl-1"); err != nil {
 			t.Fatalf("failed to delete highlight: %v", err)
@@ -174,6 +210,10 @@ func TestStore(t *testing.T) {
 		highlights, _ = st.GetHighlights("book-123")
 		if len(highlights) != 0 {
 			t.Fatalf("expected 0 highlights after book removal, got %d", len(highlights))
+		}
+		bookmarks, _ = st.GetBookmarks("book-123")
+		if len(bookmarks) != 0 {
+			t.Fatalf("expected 0 bookmarks after book removal, got %d", len(bookmarks))
 		}
 	})
 }

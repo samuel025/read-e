@@ -47,8 +47,27 @@ type Highlight struct {
 	CreatedAt  time.Time `json:"createdAt"`
 }
 
+type Bookmark struct {
+	ID           string    `json:"id"`
+	BookID       string    `json:"bookId"`
+	SpineIndex   int       `json:"spineIndex"`
+	Title        string    `json:"title"`
+	ScrollOffset float64   `json:"scrollOffset"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
+type SearchResult struct {
+	SpineIndex   int    `json:"spineIndex"`
+	ChapterTitle string `json:"chapterTitle"`
+	Snippet      string `json:"snippet"`
+	MatchCount   int    `json:"matchCount"`
+}
+
 type AppSettings struct {
 	Theme      string  `json:"theme"`
 	FontSize   float64 `json:"fontSize"`
 	FontFamily string  `json:"fontFamily"`
+	MaxWidth   int     `json:"maxWidth"`   // e.g. 780px
+	LineHeight float64 `json:"lineHeight"` // e.g. 1.7
+	TextAlign  string  `json:"textAlign"`  // "left" | "justify"
 }

@@ -1,10 +1,11 @@
 <script>
   import {
     toc, currentSpineIndex, currentBookId, currentChapter,
-    activeSidebarTab, highlights
+    activeSidebarTab, highlights, bookmarks
   } from '../stores/app.js';
-  import { getChapter, saveProgress, getHighlights } from './api.js';
+  import { getChapter, saveProgress, getHighlights, getBookmarks } from './api.js';
   import HighlightsSidebar from './HighlightsSidebar.svelte';
+  import BookmarksSidebar from './BookmarksSidebar.svelte';
 
   async function navigateTo(spineIndex) {
     const bookId = $currentBookId;
@@ -18,10 +19,13 @@
     saveProgress(bookId, spineIndex, 0);
   }
 
-  // Load highlights when book changes
+  // Load highlights & bookmarks when book changes
   $: if ($currentBookId) {
     getHighlights($currentBookId).then((items) => {
       highlights.set(items || []);
+    });
+    getBookmarks($currentBookId).then((items) => {
+      bookmarks.set(items || []);
     });
   }
 </script>
@@ -48,6 +52,18 @@
         Highlights
         {#if $highlights.length > 0}
           <span class="count-badge">{$highlights.length}</span>
+        {/if}
+      </button>
+      <button
+        class="tab-btn"
+        class:active={$activeSidebarTab === 'bookmarks'}
+        on:click={() => activeSidebarTab.set('bookmarks')}
+        role="tab"
+        aria-selected={$activeSidebarTab === 'bookmarks'}
+      >
+        Marks
+        {#if $bookmarks.length > 0}
+          <span class="count-badge">{$bookmarks.length}</span>
         {/if}
       </button>
     </div>
@@ -88,8 +104,10 @@
         </ul>
       {/if}
     </nav>
-  {:else}
+  {:else if $activeSidebarTab === 'highlights'}
     <HighlightsSidebar />
+  {:else}
+    <BookmarksSidebar />
   {/if}
 </aside>
 

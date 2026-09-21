@@ -1,11 +1,18 @@
 <script>
   import {
-    highlights, currentBookId, currentSpineIndex,
+    highlights, currentBook, currentBookId, currentSpineIndex,
     currentChapter, toc
   } from '../stores/app.js';
-  import { getHighlights, deleteHighlight, getChapter, saveProgress } from './api.js';
+  import {
+    getHighlights, deleteHighlight, updateHighlightNote,
+    getChapter, saveProgress
+  } from './api.js';
 
   let selectedColor = 'all';
+  let editingNoteId = null;
+  let noteDraft = '';
+  let showExportModal = false;
+  let copied = false;
 
   const colors = [
     { id: 'all', label: 'All', hex: 'var(--fg-tertiary)' },
@@ -52,7 +59,8 @@
     const bookId = $currentBookId;
     if (!bookId) return;
 
-    if ($currentSpineIndex !== h.spineIndex) {
+    const switchedChapter = $currentSpineIndex !== h.spineIndex;
+    if (switchedChapter) {
       currentSpineIndex.set(h.spineIndex);
       const html = await getChapter(bookId, h.spineIndex);
       currentChapter.set(html);
@@ -66,9 +74,10 @@
         iframe.contentWindow.postMessage({
           type: 'jump-to-highlight',
           highlightId: h.id,
+          text: h.text,
         }, '*');
       }
-    }, 150);
+    }, switchedChapter ? 300 : 30);
   }
 
   async function handleDelete(e, id) {
@@ -76,7 +85,6 @@
     await deleteHighlight(id);
     highlights.update(items => items.filter(item => item.id !== id));
 
-    // Also notify iframe to unwrap mark
     const iframe = document.querySelector('.chapter-frame');
     if (iframe?.contentWindow) {
       iframe.contentWindow.postMessage({
@@ -85,24 +93,119 @@
       }, '*');
     }
   }
+
+  function startEditNote(e, h) {
+    e.stopPropagation();
+    editingNoteId = h.id;
+    noteDraft = h.note || '';
+  }
+
+  function cancelEditNote(e) {
+    e?.stopPropagation();
+    editingNoteId = null;
+    noteDraft = '';
+  }
+
+  async function saveNote(e, id) {
+    e?.stopPropagation();
+    const cleanNote = noteDraft.trim();
+    await updateHighlightNote(id, cleanNote);
+    highlights.update(items =>
+      items.map(item => item.id === id ? { ...item, note: cleanNote } : item)
+    );
+    editingNoteId = null;
+    noteDraft = '';
+  }
+
+  function generateMarkdown() {
+    const bookTitle = $currentBook?.title || 'Book Highlights';
+    const author = $currentBook?.author || '';
+
+    let md = `# Highlights from ${bookTitle}\n`;
+    if (author) md += `*by ${author}*\n`;
+    md += `\nExported on ${new Date().toLocaleDateString()}\n\n---\n\n`;
+
+    // Group by chapter
+    const byChapter = {};
+    for (const h of $highlights) {
+      if (!byChapter[h.spineIndex]) {
+        byChapter[h.spineIndex] = [];
+      }
+      byChapter[h.spineIndex].push(h);
+    }
+
+    const sortedChapters = Object.keys(byChapter).map(Number).sort((a, b) => a - b);
+
+    for (const spineIdx of sortedChapters) {
+      const title = getChapterTitle(spineIdx);
+      md += `### ${title}\n\n`;
+
+      for (const h of byChapter[spineIdx]) {
+        md += `> "${h.text}"\n\n`;
+        if (h.note && h.note.trim()) {
+          md += `> 📝 **Note:** ${h.note.trim()}\n\n`;
+        }
+      }
+    }
+
+    return md;
+  }
+
+  async function copyMarkdown() {
+    const text = generateMarkdown();
+    await navigator.clipboard.writeText(text);
+    copied = true;
+    setTimeout(() => {
+      copied = false;
+    }, 2000);
+  }
+
+  function downloadMarkdown() {
+    const text = generateMarkdown();
+    const blob = new Blob([text], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const safeTitle = ($currentBook?.title || 'highlights').replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    link.href = url;
+    link.download = `${safeTitle}_highlights.md`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
 </script>
 
 <div class="highlights-panel">
-  <!-- Color filter pills -->
+  <!-- Color filter pills & Export action -->
   <div class="filter-bar">
-    {#each colors as c}
+    <div class="filter-chips">
+      {#each colors as c}
+        <button
+          class="filter-chip"
+          class:active={selectedColor === c.id}
+          on:click={() => selectedColor = c.id}
+          title="Filter by {c.label}"
+        >
+          {#if c.id !== 'all'}
+            <span class="color-dot" style="background: {c.hex};"></span>
+          {/if}
+          <span>{c.label}</span>
+        </button>
+      {/each}
+    </div>
+
+    {#if $highlights.length > 0}
       <button
-        class="filter-chip"
-        class:active={selectedColor === c.id}
-        on:click={() => selectedColor = c.id}
-        title="Filter by {c.label}"
+        class="export-btn"
+        on:click={() => showExportModal = true}
+        title="Export highlights to Markdown"
       >
-        {#if c.id !== 'all'}
-          <span class="color-dot" style="background: {c.hex};"></span>
-        {/if}
-        <span>{c.label}</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        <span>Export</span>
       </button>
-    {/each}
+    {/if}
   </div>
 
   <!-- Highlights list -->
@@ -126,6 +229,7 @@
     {:else}
       <div class="highlight-cards">
         {#each filteredHighlights as h (h.id)}
+          <!-- svelte-ignore a11y-no-static-element-interactions -->
           <div
             class="highlight-card color-{h.color}"
             on:click={() => jumpToHighlight(h)}
@@ -145,20 +249,116 @@
                   on:click={(e) => handleDelete(e, h.id)}
                   title="Delete highlight"
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
                     <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
                   </svg>
                 </button>
               </div>
             </div>
+
             <p class="highlight-quote">“{h.text}”</p>
+
+            <!-- Note section -->
+            {#if editingNoteId === h.id}
+              <!-- svelte-ignore a11y-click-events-have-key-events -->
+              <div class="note-editor" on:click|stopPropagation>
+                <textarea
+                  bind:value={noteDraft}
+                  placeholder="Add a thought or reflection..."
+                  rows="2"
+                  autoFocus
+                  on:keydown={(e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      saveNote(e, h.id);
+                    } else if (e.key === 'Escape') {
+                      cancelEditNote(e);
+                    }
+                  }}
+                ></textarea>
+                <div class="editor-actions">
+                  <span class="shortcut-tip">Cmd+Enter to save</span>
+                  <div class="button-group">
+                    <button class="btn-cancel" on:click={(e) => cancelEditNote(e)}>Cancel</button>
+                    <button class="btn-save" on:click={(e) => saveNote(e, h.id)}>Save</button>
+                  </div>
+                </div>
+              </div>
+            {:else if h.note && h.note.trim()}
+              <div class="note-display" on:click={(e) => startEditNote(e, h)} role="button" tabindex="0">
+                <div class="note-icon">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                  </svg>
+                </div>
+                <span class="note-text">{h.note}</span>
+              </div>
+            {:else}
+              <div class="add-note-row">
+                <button class="add-note-btn" on:click={(e) => startEditNote(e, h)}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                  </svg>
+                  <span>Add note</span>
+                </button>
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
     {/if}
   </div>
 </div>
+
+<!-- Export Modal -->
+{#if showExportModal}
+  <div class="modal-backdrop" on:click={() => showExportModal = false} role="dialog" aria-modal="true">
+    <div class="export-modal" on:click|stopPropagation>
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <h3>Export Highlights</h3>
+          <span class="modal-sub">Formatted Markdown for Obsidian, Notion, or Roam</span>
+        </div>
+        <button class="modal-close" on:click={() => showExportModal = false} title="Close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body">
+        <pre class="markdown-preview">{generateMarkdown()}</pre>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn-download" on:click={downloadMarkdown}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <span>Download .md</span>
+        </button>
+        <button class="btn-copy" class:copied on:click={copyMarkdown}>
+          {#if copied}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            <span>Copied to Clipboard!</span>
+          {:else}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>
+              <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+            </svg>
+            <span>Copy Markdown</span>
+          {/if}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .highlights-panel {
@@ -170,14 +370,21 @@
 
   .filter-bar {
     display: flex;
-    gap: 4px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
     padding: 8px 10px;
-    overflow-x: auto;
     border-bottom: 1px solid var(--border-subtle);
     flex-shrink: 0;
   }
 
-  .filter-bar::-webkit-scrollbar {
+  .filter-chips {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+  }
+
+  .filter-chips::-webkit-scrollbar {
     display: none;
   }
 
@@ -185,7 +392,7 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 3px 8px;
+    padding: 3px 7px;
     font-size: 0.6875rem;
     font-weight: 500;
     color: var(--fg-secondary);
@@ -209,9 +416,30 @@
     font-weight: 600;
   }
 
+  .export-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-subtle);
+    border: 1px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all var(--duration-fast) var(--ease-out);
+  }
+
+  .export-btn:hover {
+    filter: brightness(1.1);
+    transform: translateY(-0.5px);
+  }
+
   .color-dot {
-    width: 7px;
-    height: 7px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     display: inline-block;
   }
@@ -260,7 +488,6 @@
     padding: 10px 12px;
     background: var(--bg-primary);
     border: 1px solid var(--border-subtle);
-    border-left-width: 4px;
     border-radius: var(--radius-sm);
     cursor: pointer;
     text-align: left;
@@ -274,12 +501,6 @@
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
     border-color: var(--border-medium);
   }
-
-  .highlight-card.color-yellow { border-left-color: #eab308; }
-  .highlight-card.color-green  { border-left-color: #22c55e; }
-  .highlight-card.color-blue   { border-left-color: #3b82f6; }
-  .highlight-card.color-purple { border-left-color: #a855f7; }
-  .highlight-card.color-pink   { border-left-color: #f43f5e; }
 
   .dot-indicator {
     width: 6px;
@@ -353,5 +574,264 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
     margin: 0;
+  }
+
+  /* Note styling */
+  .note-display {
+    margin-top: 8px;
+    padding: 6px 8px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-xs);
+    border-left: 2px solid var(--accent);
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 0.75rem;
+    color: var(--fg-secondary);
+    line-height: 1.4;
+    cursor: pointer;
+    transition: background var(--duration-fast) var(--ease-out);
+  }
+
+  .note-display:hover {
+    background: var(--bg-hover);
+  }
+
+  .note-icon {
+    color: var(--accent);
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .note-text {
+    word-break: break-word;
+  }
+
+  .add-note-row {
+    margin-top: 6px;
+  }
+
+  .add-note-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: transparent;
+    border: none;
+    color: var(--fg-tertiary);
+    font-size: 0.6875rem;
+    padding: 2px 4px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: color var(--duration-fast) var(--ease-out);
+  }
+
+  .add-note-btn:hover {
+    color: var(--accent);
+  }
+
+  .note-editor {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .note-editor textarea {
+    width: 100%;
+    padding: 6px 8px;
+    font-size: 0.75rem;
+    font-family: inherit;
+    background: var(--bg-secondary);
+    color: var(--fg-primary);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-xs);
+    resize: vertical;
+    outline: none;
+  }
+
+  .editor-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .shortcut-tip {
+    font-size: 0.625rem;
+    color: var(--fg-tertiary);
+  }
+
+  .button-group {
+    display: flex;
+    gap: 4px;
+  }
+
+  .btn-cancel, .btn-save {
+    padding: 3px 8px;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    border-radius: 4px;
+    cursor: pointer;
+    border: none;
+  }
+
+  .btn-cancel {
+    background: transparent;
+    color: var(--fg-secondary);
+  }
+
+  .btn-cancel:hover {
+    background: var(--bg-hover);
+  }
+
+  .btn-save {
+    background: var(--accent);
+    color: white;
+    font-weight: 600;
+  }
+
+  .btn-save:hover {
+    filter: brightness(1.1);
+  }
+
+  /* Modal Styles */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+    animation: fadeIn 0.15s ease-out;
+  }
+
+  .export-modal {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-md);
+    width: 100%;
+    max-width: 600px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+    overflow: hidden;
+    animation: scaleIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .modal-title-wrap h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--fg-primary);
+  }
+
+  .modal-sub {
+    font-size: 0.75rem;
+    color: var(--fg-tertiary);
+    margin-top: 2px;
+  }
+
+  .modal-close {
+    background: transparent;
+    border: none;
+    color: var(--fg-tertiary);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal-close:hover {
+    color: var(--fg-primary);
+    background: var(--bg-hover);
+  }
+
+  .modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+    background: var(--bg-secondary);
+  }
+
+  .markdown-preview {
+    margin: 0;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--fg-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-primary);
+  }
+
+  .btn-download, .btn-copy {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all var(--duration-fast) var(--ease-out);
+  }
+
+  .btn-download {
+    background: transparent;
+    border: 1px solid var(--border-subtle);
+    color: var(--fg-secondary);
+  }
+
+  .btn-download:hover {
+    background: var(--bg-hover);
+    color: var(--fg-primary);
+  }
+
+  .btn-copy {
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: white;
+    font-weight: 600;
+  }
+
+  .btn-copy:hover {
+    filter: brightness(1.1);
+  }
+
+  .btn-copy.copied {
+    background: #10b981;
+    border-color: #10b981;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes scaleIn {
+    from { transform: scale(0.96); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
   }
 </style>
