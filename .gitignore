@@ -1,0 +1,41 @@
+# Binaries and build artifacts
+build/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Frontend dependencies and builds
+frontend/node_modules/
+frontend/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Wails auto-generated bindings
+frontend/src/lib/wailsjs/
+
+# SQLite & local state
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# IDEs and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment & logs
+.env
+.env.*
+!.env.example
+*.log

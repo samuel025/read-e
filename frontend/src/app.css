@@ -1,0 +1,300 @@
+/* ============================================
+   EPUB Reader — Design System
+   Based on Emil Kowalski's design engineering
+   philosophy: taste, unseen details, correct
+   easings, sub-300ms durations, and premium feel.
+   ============================================ */
+
+/* ---- CSS Custom Properties ---- */
+:root {
+  /* Easings — strong custom curves, never built-in weak defaults */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* Durations — UI stays under 300ms */
+  --duration-fast: 120ms;
+  --duration-normal: 200ms;
+  --duration-slow: 280ms;
+
+  /* Spacing */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+
+  /* Radii */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  /* Shadows — semi-transparent, layered (never solid borders) */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1), 0 4px 6px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.1), 0 8px 10px rgba(0, 0, 0, 0.04);
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-serif: 'Merriweather', Georgia, serif;
+
+  /* Sidebar */
+  --sidebar-width: 280px;
+  --toolbar-height: 56px;
+}
+
+/* ---- Theme: Dark (default) ---- */
+[data-theme="dark"], :root {
+  --bg-primary: #0f1117;
+  --bg-secondary: #161923;
+  --bg-tertiary: #1c2030;
+  --bg-elevated: #222638;
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-active: rgba(255, 255, 255, 0.1);
+
+  --fg-primary: #e8eaed;
+  --fg-secondary: #9ba1b0;
+  --fg-tertiary: #6b7280;
+  --fg-accent: #818cf8;
+
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-medium: rgba(255, 255, 255, 0.12);
+
+  --accent: #818cf8;
+  --accent-hover: #6366f1;
+  --accent-subtle: rgba(129, 140, 248, 0.12);
+
+  --glass-bg: rgba(22, 25, 35, 0.85);
+  --glass-border: rgba(255, 255, 255, 0.08);
+
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(255, 255, 255, 0.15);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.25);
+
+  color-scheme: dark;
+}
+
+/* ---- Theme: Light ---- */
+[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fb;
+  --bg-tertiary: #f1f3f5;
+  --bg-elevated: #ffffff;
+  --bg-hover: rgba(0, 0, 0, 0.04);
+  --bg-active: rgba(0, 0, 0, 0.08);
+
+  --fg-primary: #1a1d26;
+  --fg-secondary: #5a6172;
+  --fg-tertiary: #8b92a5;
+  --fg-accent: #6366f1;
+
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-medium: rgba(0, 0, 0, 0.1);
+
+  --accent: #6366f1;
+  --accent-hover: #4f46e5;
+  --accent-subtle: rgba(99, 102, 241, 0.08);
+
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(0, 0, 0, 0.06);
+
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.15);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.3);
+
+  color-scheme: light;
+}
+
+/* ---- Theme: Sepia ---- */
+[data-theme="sepia"] {
+  --bg-primary: #f5f0e8;
+  --bg-secondary: #efe8db;
+  --bg-tertiary: #e8dece;
+  --bg-elevated: #f9f4ec;
+  --bg-hover: rgba(139, 90, 43, 0.06);
+  --bg-active: rgba(139, 90, 43, 0.1);
+
+  --fg-primary: #3d2e1c;
+  --fg-secondary: #6b5744;
+  --fg-tertiary: #9a8672;
+  --fg-accent: #a0522d;
+
+  --border-subtle: rgba(139, 90, 43, 0.1);
+  --border-medium: rgba(139, 90, 43, 0.15);
+
+  --accent: #a0522d;
+  --accent-hover: #8b4513;
+  --accent-subtle: rgba(160, 82, 45, 0.1);
+
+  --glass-bg: rgba(245, 240, 232, 0.9);
+  --glass-border: rgba(139, 90, 43, 0.1);
+
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: rgba(139, 90, 43, 0.2);
+  --scrollbar-thumb-hover: rgba(139, 90, 43, 0.35);
+
+  color-scheme: light;
+}
+
+/* ---- Global Reset ---- */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-primary);
+  color: var(--fg-primary);
+  line-height: 1.6;
+  overflow: hidden;
+  height: 100vh;
+  /* Wails: no drag on the whole window */
+  user-select: none;
+}
+
+#app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Scrollbar ---- */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* ---- Button base ---- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  /* Specify exact properties — never transition: all */
+  transition: transform var(--duration-fast) var(--ease-out),
+              background var(--duration-normal) var(--ease-out),
+              opacity var(--duration-normal) var(--ease-out);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Button press: scale(0.97) for instant feedback */
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+.btn-secondary {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+.btn-secondary:hover {
+  background: var(--bg-active);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--fg-secondary);
+}
+.btn-ghost:hover {
+  background: var(--bg-hover);
+  color: var(--fg-primary);
+}
+
+.btn-icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+}
+
+/* ---- Stagger animation for lists ---- */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.stagger-item {
+  opacity: 0;
+  animation: fadeInUp 300ms var(--ease-out) forwards;
+}
+
+.stagger-item:nth-child(1) { animation-delay: 0ms; }
+.stagger-item:nth-child(2) { animation-delay: 50ms; }
+.stagger-item:nth-child(3) { animation-delay: 100ms; }
+.stagger-item:nth-child(4) { animation-delay: 150ms; }
+.stagger-item:nth-child(5) { animation-delay: 200ms; }
+.stagger-item:nth-child(6) { animation-delay: 250ms; }
+.stagger-item:nth-child(7) { animation-delay: 300ms; }
+.stagger-item:nth-child(8) { animation-delay: 350ms; }
+.stagger-item:nth-child(9) { animation-delay: 400ms; }
+.stagger-item:nth-child(10) { animation-delay: 450ms; }
+.stagger-item:nth-child(n+11) { animation-delay: 500ms; }
+
+/* ---- Reduced motion ---- */
+@media (prefers-reduced-motion: reduce) {
+  .stagger-item {
+    animation: none;
+    opacity: 1;
+  }
+
+  * {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* ---- Focus visible ---- */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- Selection ---- */
+::selection {
+  background: var(--accent-subtle);
+  color: var(--fg-primary);
+}

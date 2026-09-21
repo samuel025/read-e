@@ -1,0 +1,311 @@
+<script>
+  import { library, libraryLoading, settings, settingsOpen } from '../stores/app.js';
+  import { scanLibrary, addBook, selectFolder, selectFile, getLibrary, removeBook } from './api.js';
+  import BookCard from './BookCard.svelte';
+  import SettingsPanel from './SettingsPanel.svelte';
+
+  let searchQuery = '';
+
+  $: filteredBooks = $library.filter((b) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      b.title.toLowerCase().includes(q) ||
+      b.author.toLowerCase().includes(q)
+    );
+  });
+
+  async function handleAddFolder() {
+    const dir = await selectFolder();
+    if (!dir) return;
+    libraryLoading.set(true);
+    try {
+      const books = await scanLibrary(dir);
+      if (books) library.set(books);
+    } finally {
+      libraryLoading.set(false);
+    }
+  }
+
+  async function handleAddFile() {
+    const file = await selectFile();
+    if (!file) return;
+    libraryLoading.set(true);
+    try {
+      const books = await addBook(file);
+      if (books) library.set(books);
+    } finally {
+      libraryLoading.set(false);
+    }
+  }
+
+  async function handleRemoveBook(e) {
+    const bookId = e.detail;
+    await removeBook(bookId);
+    const books = await getLibrary();
+    if (books) library.set(books);
+  }
+</script>
+
+<div class="library-view">
+  <!-- Header / Toolbar -->
+  <header class="library-header">
+    <div class="header-left">
+      <h1 class="app-title">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
+        </svg>
+        Library
+      </h1>
+      <span class="book-count">{$library.length} {$library.length === 1 ? 'book' : 'books'}</span>
+    </div>
+    <div class="header-actions">
+      <div class="search-wrapper">
+        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+        </svg>
+        <input
+          type="text"
+          class="search-input"
+          placeholder="Search books..."
+          bind:value={searchQuery}
+        />
+      </div>
+      <button class="btn btn-secondary" on:click={handleAddFile} id="add-file-btn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12h14"/><path d="M12 5v14"/>
+        </svg>
+        Add File
+      </button>
+      <button class="btn btn-primary" on:click={handleAddFolder} id="add-folder-btn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>
+        </svg>
+        Add Folder
+      </button>
+      <button
+        class="btn btn-icon btn-ghost"
+        on:click={() => settingsOpen.set(true)}
+        id="settings-btn"
+        title="Settings"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <main class="library-content">
+    {#if $libraryLoading}
+      <div class="loading-state">
+        <div class="spinner"></div>
+        <p>Scanning for books...</p>
+      </div>
+    {:else if $library.length === 0}
+      <div class="empty-state">
+        <div class="empty-icon">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.4">
+            <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
+            <path d="M12 6v7"/><path d="m15 9-3-3-3 3"/>
+          </svg>
+        </div>
+        <h2>Your library is empty</h2>
+        <p>Add EPUB files or scan a folder to get started</p>
+        <div class="empty-actions">
+          <button class="btn btn-primary" on:click={handleAddFolder}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>
+            </svg>
+            Scan Folder
+          </button>
+          <button class="btn btn-secondary" on:click={handleAddFile}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 12h14"/><path d="M12 5v14"/>
+            </svg>
+            Add File
+          </button>
+        </div>
+      </div>
+    {:else if filteredBooks.length === 0}
+      <div class="empty-state">
+        <p>No books match "{searchQuery}"</p>
+      </div>
+    {:else}
+      <div class="book-grid">
+        {#each filteredBooks as book, i (book.id)}
+          <div class="stagger-item" style="animation-delay: {Math.min(i * 50, 500)}ms">
+            <BookCard {book} on:remove={handleRemoveBook} />
+          </div>
+        {/each}
+      </div>
+    {/if}
+  </main>
+</div>
+
+{#if $settingsOpen}
+  <SettingsPanel />
+{/if}
+
+<style>
+  .library-view {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+  }
+
+  .library-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-md) var(--space-xl);
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--glass-bg);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    /* Wails: drag region for moving the window */
+    --wails-draggable: drag;
+    height: var(--toolbar-height);
+    flex-shrink: 0;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    --wails-draggable: no-drag;
+  }
+
+  .app-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    color: var(--fg-primary);
+  }
+
+  .book-count {
+    font-size: 0.8125rem;
+    color: var(--fg-tertiary);
+    background: var(--bg-hover);
+    padding: 2px 10px;
+    border-radius: 100px;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    --wails-draggable: no-drag;
+  }
+
+  .search-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+
+  .search-icon {
+    position: absolute;
+    left: 10px;
+    color: var(--fg-tertiary);
+    pointer-events: none;
+  }
+
+  .search-input {
+    background: var(--bg-hover);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 6px 12px 6px 32px;
+    font-size: 0.8125rem;
+    font-family: var(--font-sans);
+    color: var(--fg-primary);
+    width: 200px;
+    transition: border-color var(--duration-normal) var(--ease-out),
+                width var(--duration-normal) var(--ease-out);
+  }
+
+  .search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    width: 260px;
+  }
+
+  .search-input::placeholder {
+    color: var(--fg-tertiary);
+  }
+
+  /* Content area */
+  .library-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-xl);
+  }
+
+  .book-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: var(--space-lg);
+  }
+
+  /* Empty state */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: var(--space-md);
+    text-align: center;
+    color: var(--fg-secondary);
+  }
+
+  .empty-state h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--fg-primary);
+  }
+
+  .empty-state p {
+    font-size: 0.9375rem;
+    max-width: 360px;
+  }
+
+  .empty-icon {
+    margin-bottom: var(--space-md);
+  }
+
+  .empty-actions {
+    display: flex;
+    gap: var(--space-sm);
+    margin-top: var(--space-md);
+  }
+
+  /* Loading */
+  .loading-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: var(--space-md);
+    color: var(--fg-secondary);
+  }
+
+  .spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--border-subtle);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+</style>
