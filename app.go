@@ -99,6 +99,10 @@ func (a *App) GetLibrary() ([]library.BookMeta, error) {
 	return a.store.GetBooks()
 }
 
+func (a *App) UpdateBookCover(bookID string, coverBase64 string) error {
+	return a.store.UpdateBookCover(bookID, coverBase64)
+}
+
 func (a *App) RemoveBook(bookID string) error {
 	a.mu.Lock()
 	if r, ok := a.openBooks[bookID]; ok {

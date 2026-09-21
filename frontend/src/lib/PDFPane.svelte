@@ -28,6 +28,7 @@
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
+  let paneEl;
   let viewportEl;
   let viewportWidth = 0;
   let loading = true;
@@ -52,6 +53,7 @@
     visible: false,
     x: 0,
     y: 0,
+    transform: 'translate(-50%, -100%)',
     pageIndex: 0,
     text: '',
     range: null,
@@ -124,7 +126,8 @@
     window.addEventListener('pdf-zoom-out', handleZoomOut);
     window.addEventListener('pdf-zoom-fit', handleZoomFit);
 
-    document.addEventListener('selectionchange', handleSelectionChange);
+    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('mousedown', handleMouseDown);
   });
 
   onDestroy(() => {
@@ -139,7 +142,8 @@
     window.removeEventListener('pdf-zoom-in', handleZoomIn);
     window.removeEventListener('pdf-zoom-out', handleZoomOut);
     window.removeEventListener('pdf-zoom-fit', handleZoomFit);
-    document.removeEventListener('selectionchange', handleSelectionChange);
+    window.removeEventListener('mouseup', handleMouseUp);
+    window.removeEventListener('mousedown', handleMouseDown);
 
     if (scrollRAF) cancelAnimationFrame(scrollRAF);
     if (saveProgressTimer) clearTimeout(saveProgressTimer);
@@ -305,6 +309,9 @@
 
   function handleScroll() {
     isScrolling = true;
+    if (selectionToolbar.visible) selectionToolbar.visible = false;
+    if (activeNotePopover) activeNotePopover = null;
+
     if (renderTimeoutId !== null) {
       clearTimeout(renderTimeoutId);
       renderTimeoutId = null;
@@ -334,6 +341,25 @@
         if ($currentBookId) saveProgress($currentBookId, activeIndex, viewportEl?.scrollTop || 0);
       }, 600);
     });
+  }
+
+  function handleMouseDown(e) {
+    if (e.target.closest('.reader-selection-menu') || e.target.closest('.reader-inline-note-box')) {
+      return;
+    }
+    if (selectionToolbar.visible) {
+      selectionToolbar.visible = false;
+    }
+    if (activeNotePopover && !e.target.closest('mark.reader-highlight')) {
+      activeNotePopover = null;
+    }
+  }
+
+  function handleMouseUp(e) {
+    if (e.target.closest('.reader-selection-menu') || e.target.closest('.reader-inline-note-box')) {
+      return;
+    }
+    setTimeout(handleSelectionChange, 25);
   }
 
   function queueVisiblePages(activeIdx) {
@@ -388,8 +414,9 @@
     const pageNumber = pageIndex + 1;
     renderedPages.set(pageIndex, { loading: true });
 
+    let page = null;
     try {
-      const page = await doc.getPage(pageNumber);
+      page = await doc.getPage(pageNumber);
       const scale = getScaleForPage(pageIndex);
       const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
       const viewport = page.getViewport({ scale });
@@ -432,24 +459,28 @@
 
       renderedPages.set(pageIndex, { page, renderTask, canvas, textLayer: textLayerDiv, scale });
 
-      page.getTextContent().then((textContent) => {
-        if (!renderedPages.has(pageIndex)) return;
-        const textLayerTask = pdfjsLib.renderTextLayer({
-          textContentSource: textContent,
-          container: textLayerDiv,
-          viewport,
-        });
-        return textLayerTask.promise;
-      }).then(() => {
-        applyHighlightsToPage(pageIndex, textLayerDiv);
-      }).catch(() => {});
-
-      page.cleanup();
+      try {
+        const textContent = await page.getTextContent();
+        if (renderedPages.has(pageIndex)) {
+          const textLayerTask = pdfjsLib.renderTextLayer({
+            textContentSource: textContent,
+            container: textLayerDiv,
+            viewport,
+          });
+          await textLayerTask.promise;
+          applyHighlightsToPage(pageIndex, textLayerDiv);
+        }
+      } catch (e) {
+        console.error(`Error rendering text layer for page ${pageNumber}:`, e);
+      } finally {
+        page.cleanup();
+      }
     } catch (err) {
       if (err.name !== 'RenderingCancelledException') {
         console.error(`Error rendering page ${pageNumber}:`, err);
       }
       renderedPages.delete(pageIndex);
+      if (page) page.cleanup();
     }
   }
 
@@ -507,7 +538,16 @@
     handleZoomChanged();
   }
 
+  $: if ($highlights && renderedPages.size > 0) {
+    for (const [pageIndex, pageData] of renderedPages) {
+      if (pageData.textLayer) {
+        applyHighlightsToPage(pageIndex, pageData.textLayer);
+      }
+    }
+  }
+
   function handleZoomChanged() {
+    const activeIdx = $currentSpineIndex; // Preserve current page before zoom changes layout
     cancelAllRenders();
     computePageTops();
     if (!viewportEl) return;
@@ -527,7 +567,11 @@
       }
     }
 
-    const activeIdx = getActivePageIndex();
+    // Restore scroll position to the same logical page
+    if (pageTops[activeIdx] !== undefined) {
+      viewportEl.scrollTop = pageTops[activeIdx];
+    }
+
     queueVisiblePages(activeIdx);
     scheduleRender();
   }
@@ -537,7 +581,22 @@
     const newWidth = viewportEl.clientWidth;
     if (newWidth > 0 && Math.abs(newWidth - viewportWidth) > 6) {
       viewportWidth = newWidth;
-      handleZoomChanged();
+
+      const isMaximized = window.outerWidth >= window.screen.availWidth * 0.98 || window.innerWidth >= 1400;
+      const isDefault = window.innerWidth <= 1250;
+
+      let zoomUpdated = false;
+      if (isMaximized && $pdfZoom !== 50) {
+        pdfZoom.set(50);
+        zoomUpdated = true;
+      } else if (isDefault && $pdfZoom !== 100) {
+        pdfZoom.set(100);
+        zoomUpdated = true;
+      }
+
+      if (!zoomUpdated) {
+        handleZoomChanged();
+      }
     }
   }
 
@@ -591,7 +650,44 @@
     } catch (_) {}
   }
 
+  function wrapRangeWithMark(range, id, color, note) {
+    try {
+      if (range.startContainer === range.endContainer && range.startContainer.nodeType === Node.TEXT_NODE) {
+        wrapTextNodeRange(range.startContainer, range.startOffset, range.endOffset, id, color, note);
+        return true;
+      }
+
+      const commonAncestor = range.commonAncestorContainer;
+      const root = commonAncestor.nodeType === Node.TEXT_NODE ? commonAncestor.parentElement : commonAncestor;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+      const textNodes = [];
+      let curr;
+      while ((curr = walker.nextNode())) {
+        if (range.intersectsNode(curr)) {
+          textNodes.push(curr);
+        }
+      }
+
+      if (!textNodes.length) return false;
+
+      for (let i = textNodes.length - 1; i >= 0; i--) {
+        const node = textNodes[i];
+        const start = (node === range.startContainer) ? range.startOffset : 0;
+        const end = (node === range.endContainer) ? range.endOffset : node.nodeValue.length;
+        if (start < end) {
+          wrapTextNodeRange(node, start, end, id, color, note);
+        }
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function highlightTextInContainer(container, h) {
+    if (!container || !h || !h.id) return;
+    if (container.querySelector(`[data-highlight-id="${h.id}"]`)) return;
+
     const targetText = (h.text || '').trim();
     if (!targetText) return;
 
@@ -608,40 +704,40 @@
       }
     }
 
-    let fullText = '';
-    const nodeMap = [];
+    const charMap = [];
+    let strippedDom = '';
     for (const tNode of textNodes) {
       if (tNode.parentElement?.classList.contains('reader-highlight')) continue;
       const val = tNode.nodeValue;
-      for (let o = 0; o < val.length; o++) { nodeMap.push({ node: tNode, offset: o }); fullText += val[o]; }
+      for (let o = 0; o < val.length; o++) {
+        const ch = val[o];
+        if (!/\s/.test(ch)) {
+          charMap.push({ node: tNode, offset: o });
+          strippedDom += ch;
+        }
+      }
     }
 
-    const cleanTarget = targetText.replace(/\s+/g, ' ');
-    let normFull = '', inSpace = false;
-    const normToOrigMap = [];
-    for (let c = 0; c < fullText.length; c++) {
-      const ch = fullText[c];
-      if (/\s/.test(ch)) {
-        if (!inSpace) { normToOrigMap.push(c); normFull += ' '; inSpace = true; }
-      } else { normToOrigMap.push(c); normFull += ch; inSpace = false; }
-    }
+    const strippedTarget = targetText.replace(/\s+/g, '');
+    if (!strippedTarget) return;
 
-    let foundIdx = normFull.indexOf(cleanTarget);
-    if (foundIdx === -1) foundIdx = normFull.toLowerCase().indexOf(cleanTarget.toLowerCase());
+    let foundIdx = strippedDom.indexOf(strippedTarget);
+    if (foundIdx === -1) foundIdx = strippedDom.toLowerCase().indexOf(strippedTarget.toLowerCase());
     if (foundIdx === -1) return;
 
-    const normEndIdx = foundIdx + cleanTarget.length - 1;
-    const startCharIdx = normToOrigMap[foundIdx];
-    const endCharIdx = (normToOrigMap[normEndIdx] || startCharIdx) + 1;
-
+    const endCharIdx = foundIdx + strippedTarget.length;
     const nodeSpans = [];
     let cur = null, sOffset = 0, eOffset = 0;
-    for (let i = startCharIdx; i < endCharIdx && i < nodeMap.length; i++) {
-      const item = nodeMap[i];
+    for (let i = foundIdx; i < endCharIdx && i < charMap.length; i++) {
+      const item = charMap[i];
       if (item.node !== cur) {
         if (cur) nodeSpans.push({ node: cur, start: sOffset, end: eOffset });
-        cur = item.node; sOffset = item.offset; eOffset = item.offset + 1;
-      } else { eOffset = item.offset + 1; }
+        cur = item.node;
+        sOffset = item.offset;
+        eOffset = item.offset + 1;
+      } else {
+        eOffset = item.offset + 1;
+      }
     }
     if (cur) nodeSpans.push({ node: cur, start: sOffset, end: eOffset });
 
@@ -659,25 +755,42 @@
     }
 
     const text = sel.toString().trim();
-    if (!text || text.length < 1) { selectionToolbar.visible = false; return; }
+    if (!text || text.length < 1) {
+      if (selectionToolbar.visible) selectionToolbar.visible = false;
+      return;
+    }
 
     const range = sel.getRangeAt(0);
-    const container = range.commonAncestorContainer;
-    const pageEl = (container.nodeType === 1 ? container : container.parentElement)?.closest('.pdf-page-container');
+    const startEl = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+    const pageEl = startEl?.closest('.pdf-page-container');
 
-    if (!pageEl || !viewportEl.contains(pageEl)) { selectionToolbar.visible = false; return; }
+    if (!pageEl || !viewportEl || !viewportEl.contains(pageEl)) {
+      if (selectionToolbar.visible) selectionToolbar.visible = false;
+      return;
+    }
 
     const pageIndex = parseInt(pageEl.getAttribute('data-page-index'), 10);
-    const rect = range.getBoundingClientRect();
-    const vpRect = viewportEl.getBoundingClientRect();
+    let rect = range.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      const clientRects = range.getClientRects();
+      if (clientRects.length > 0) {
+        rect = clientRects[0];
+      } else if (startEl) {
+        rect = startEl.getBoundingClientRect();
+      }
+    }
+
+    const paneRect = paneEl ? paneEl.getBoundingClientRect() : viewportEl.getBoundingClientRect();
+    const isNearTop = rect.top - paneRect.top < 50;
 
     selectionToolbar = {
       visible: true,
-      x: rect.left - vpRect.left + rect.width / 2,
-      y: rect.top - vpRect.top - 8,
+      x: Math.max(100, Math.min(paneRect.width - 100, rect.left - paneRect.left + rect.width / 2)),
+      y: isNearTop ? rect.bottom - paneRect.top + 8 : rect.top - paneRect.top - 8,
+      transform: isNearTop ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
       pageIndex,
       text,
-      range,
+      range: range.cloneRange(),
     };
   }
 
@@ -697,8 +810,14 @@
     await addHighlight(newH);
     highlights.update((items) => [newH, ...items]);
 
-    const textLayerEl = document.getElementById(`page-${selectionToolbar.pageIndex + 1}`)?.querySelector('.textLayer');
-    if (textLayerEl) highlightTextInContainer(textLayerEl, newH);
+    let applied = false;
+    if (selectionToolbar.range) {
+      applied = wrapRangeWithMark(selectionToolbar.range, newH.id, newH.color, newH.note);
+    }
+    if (!applied) {
+      const textLayerEl = document.getElementById(`page-${selectionToolbar.pageIndex + 1}`)?.querySelector('.textLayer');
+      if (textLayerEl) highlightTextInContainer(textLayerEl, newH);
+    }
 
     window.getSelection()?.removeAllRanges();
     selectionToolbar.visible = false;
@@ -710,18 +829,34 @@
     selectionToolbar.visible = false;
   }
 
+  function changeHighlightColor(highlightId, newColor) {
+    highlights.update((items) =>
+      items.map((item) => (item.id === highlightId ? { ...item, color: newColor } : item))
+    );
+    if (activeNotePopover) {
+      activeNotePopover.highlight = { ...activeNotePopover.highlight, color: newColor };
+    }
+    const marks = viewportEl?.querySelectorAll(`[data-highlight-id="${highlightId}"]`);
+    marks?.forEach((mark) => {
+      mark.className = `reader-highlight reader-highlight-${newColor}`;
+      mark.setAttribute('data-color', newColor);
+    });
+    const h = $highlights.find((item) => item.id === highlightId);
+    if (h) addHighlight({ ...h, color: newColor });
+  }
+
   function openNotePopover(markEl, highlightId) {
     const h = $highlights.find((item) => item.id === highlightId);
     if (!h) return;
     const rect = markEl.getBoundingClientRect();
-    const vpRect = viewportEl.getBoundingClientRect();
+    const paneRect = paneEl ? paneEl.getBoundingClientRect() : viewportEl.getBoundingClientRect();
     activeNotePopover = {
       highlightId,
       highlight: h,
       note: h.note || '',
       draft: h.note || '',
-      x: Math.min(vpRect.width - 280, Math.max(16, rect.left - vpRect.left)),
-      y: rect.bottom - vpRect.top + 8,
+      x: Math.min(paneRect.width - 280, Math.max(16, rect.left - paneRect.left)),
+      y: Math.min(paneRect.height - 180, rect.bottom - paneRect.top + 8),
     };
   }
 
@@ -884,7 +1019,7 @@
   }
 </script>
 
-<div class="pdf-reader-pane" role="region" aria-label="PDF Document Viewer">
+<div class="pdf-reader-pane" bind:this={paneEl} role="region" aria-label="PDF Document Viewer">
   {#if loading}
     <div class="pdf-center-state">
       <div class="pdf-spinner"></div>
@@ -930,67 +1065,6 @@
       {/each}
     </div>
 
-    {#if selectionToolbar.visible}
-      <div
-        class="reader-selection-menu"
-        style="top: {selectionToolbar.y}px; left: {selectionToolbar.x}px; transform: translate(-50%, -100%);"
-      >
-        {#each colors as c}
-          <button
-            class="reader-color-btn"
-            style="background-color: {c.hex};"
-            title="Highlight {c.label}"
-            on:mousedown|preventDefault
-            on:click={() => createHighlight(c.id)}
-          ></button>
-        {/each}
-
-        <div class="reader-menu-divider"></div>
-
-        <button
-          class="reader-icon-btn"
-          title="Copy Text"
-          on:mousedown|preventDefault
-          on:click={copySelectedText}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-          </svg>
-        </button>
-      </div>
-    {/if}
-
-    {#if activeNotePopover}
-      <div
-        class="reader-inline-note-box"
-        style="top: {activeNotePopover.y}px; left: {activeNotePopover.x}px;"
-      >
-        <div class="note-box-header">
-          <span class="note-box-title">Note</span>
-          <button
-            class="reader-delete-btn"
-            title="Delete Highlight"
-            on:click={() => handleDeleteHighlight(activeNotePopover.highlightId)}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-          </button>
-        </div>
-        <textarea
-          bind:value={activeNotePopover.draft}
-          placeholder="Add note or thoughts..."
-          rows="3"
-        ></textarea>
-        <div class="note-btn-row">
-          <button class="btn-cancel" on:click={() => activeNotePopover = null}>Cancel</button>
-          <button class="btn-save-note" on:click={saveNoteDraft}>Save</button>
-        </div>
-      </div>
-    {/if}
-
     <div class="pdf-nav">
       <button
         class="nav-btn prev"
@@ -1016,6 +1090,77 @@
       </button>
     </div>
   </div>
+
+  {#if selectionToolbar.visible}
+    <div
+      class="reader-selection-menu"
+      style="top: {selectionToolbar.y}px; left: {selectionToolbar.x}px; transform: {selectionToolbar.transform || 'translate(-50%, -100%)'};"
+    >
+      {#each colors as c}
+        <button
+          class="reader-color-btn"
+          style="background-color: {c.hex};"
+          title="Highlight {c.label}"
+          on:mousedown|preventDefault
+          on:click={() => createHighlight(c.id)}
+        ></button>
+      {/each}
+
+      <div class="reader-menu-divider"></div>
+
+      <button
+        class="reader-icon-btn"
+        title="Copy Text"
+        on:mousedown|preventDefault
+        on:click={copySelectedText}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+      </button>
+    </div>
+  {/if}
+
+  {#if activeNotePopover}
+    <div
+      class="reader-inline-note-box"
+      style="top: {activeNotePopover.y}px; left: {activeNotePopover.x}px;"
+    >
+      <div class="note-box-header">
+        <div class="note-color-row">
+          {#each colors as c}
+            <button
+              class="reader-color-btn"
+              class:selected={activeNotePopover.highlight?.color === c.id}
+              style="background-color: {c.hex};"
+              title="Change to {c.label}"
+              on:click={() => changeHighlightColor(activeNotePopover.highlightId, c.id)}
+            ></button>
+          {/each}
+        </div>
+        <button
+          class="reader-delete-btn"
+          title="Delete Highlight"
+          on:click={() => handleDeleteHighlight(activeNotePopover.highlightId)}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+        </button>
+      </div>
+      <textarea
+        bind:value={activeNotePopover.draft}
+        placeholder="Add note or thoughts..."
+        rows="3"
+      ></textarea>
+      <div class="note-btn-row">
+        <button class="btn-cancel" on:click={() => activeNotePopover = null}>Cancel</button>
+        <button class="btn-save-note" on:click={saveNoteDraft}>Save</button>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -1137,6 +1282,9 @@
 
   :global(.pdf-canvas) {
     display: block;
+    user-select: none;
+    -webkit-user-select: none;
+    pointer-events: none;
   }
 
   :global(.textLayer) {
@@ -1144,11 +1292,44 @@
     top: 0;
     left: 0;
     overflow: hidden;
-    opacity: 1;
+    opacity: 1 !important;
+    user-select: text;
+    -webkit-user-select: text;
+    pointer-events: auto;
+    z-index: 2;
   }
 
-  :global(.textLayer ::selection) {
-    background: rgba(99, 102, 241, 0.35);
+  :global(.textLayer),
+  :global(.textLayer *),
+  :global(.textLayer span),
+  :global(.textLayer mark),
+  :global(.textLayer br) {
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
+    text-shadow: none !important;
+  }
+
+  :global(.textLayer span),
+  :global(.textLayer mark) {
+    user-select: text;
+    -webkit-user-select: text;
+    pointer-events: auto;
+  }
+
+  :global(.textLayer ::selection),
+  :global(.textLayer *::selection) {
+    background: rgba(99, 102, 241, 0.35) !important;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
+    text-shadow: none !important;
+  }
+
+  :global(.textLayer ::-moz-selection),
+  :global(.textLayer *::-moz-selection) {
+    background: rgba(99, 102, 241, 0.35) !important;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
+    text-shadow: none !important;
   }
 
   :global(mark.reader-highlight) {
@@ -1157,6 +1338,9 @@
     transition: filter 0.15s ease;
     display: inline;
     padding: 1px 0;
+    pointer-events: auto;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
   }
 
   :global(mark.reader-highlight:hover) {
@@ -1165,23 +1349,28 @@
 
   :global(mark.reader-highlight-yellow) {
     background-color: rgba(250, 204, 21, 0.6) !important;
-    color: inherit;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
   }
   :global(mark.reader-highlight-green) {
     background-color: rgba(74, 222, 128, 0.55) !important;
-    color: inherit;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
   }
   :global(mark.reader-highlight-blue) {
     background-color: rgba(96, 165, 250, 0.55) !important;
-    color: inherit;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
   }
   :global(mark.reader-highlight-purple) {
     background-color: rgba(192, 132, 252, 0.55) !important;
-    color: inherit;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
   }
   :global(mark.reader-highlight-pink) {
     background-color: rgba(251, 113, 133, 0.55) !important;
-    color: inherit;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
   }
 
   :global(.pulse-highlight) {
@@ -1198,6 +1387,8 @@
     animation: searchPulse 2.5s ease-out forwards;
     background-color: rgba(245, 158, 11, 0.6) !important;
     border-radius: 2px;
+    color: transparent !important;
+    -webkit-text-fill-color: transparent !important;
   }
 
   @keyframes searchPulse {
@@ -1222,8 +1413,8 @@
   }
 
   @keyframes menuPopIn {
-    0% { transform: translate(-50%, -100%) scale(0.85); opacity: 0; }
-    100% { transform: translate(-50%, -100%) scale(1); opacity: 1; }
+    0% { opacity: 0; }
+    100% { opacity: 1; }
   }
 
   .reader-color-btn {
@@ -1236,9 +1427,16 @@
     transition: transform 0.12s ease, border-color 0.12s ease;
   }
 
-  .reader-color-btn:hover {
-    transform: scale(1.25);
+  .reader-color-btn:hover,
+  .reader-color-btn.selected {
+    transform: scale(1.2);
     border-color: var(--fg-primary);
+  }
+
+  .note-color-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
   .reader-menu-divider {
@@ -1290,12 +1488,6 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-  }
-
-  .note-box-title {
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: var(--fg-primary);
   }
 
   .reader-delete-btn {

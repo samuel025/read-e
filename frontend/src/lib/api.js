@@ -39,6 +39,12 @@ export async function removeBook(bookID) {
   return go.RemoveBook(bookID);
 }
 
+export async function updateBookCover(bookID, coverBase64) {
+  const go = getGoBinding();
+  if (!go) return;
+  return go.UpdateBookCover(bookID, coverBase64);
+}
+
 export async function openBook(bookID) {
   const go = getGoBinding();
   if (!go) return {};

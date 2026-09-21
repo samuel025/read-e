@@ -133,6 +133,7 @@
     padding: 0;
     font-family: var(--font-sans);
     transition: transform var(--duration-normal) var(--ease-out);
+    width: 100%;
   }
 
   .book-card:active {
@@ -141,6 +142,7 @@
 
   .cover-wrapper {
     position: relative;
+    width: 100%;
     aspect-ratio: 2 / 3;
     border-radius: var(--radius-md);
     overflow: hidden;

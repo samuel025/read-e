@@ -1,9 +1,10 @@
 <script>
   import { library, libraryLoading, settings, settingsOpen } from '../stores/app.js';
-  import { scanLibrary, addBook, selectFolder, selectFile, getLibrary, removeBook } from './api.js';
+  import { scanLibrary, addBook, selectFolder, selectFile, getLibrary, removeBook, getPDFData, updateBookCover } from './api.js';
   import BookCard from './BookCard.svelte';
 
   let searchQuery = '';
+  const generatingCovers = new Set();
 
   $: filteredBooks = $library.filter((b) => {
     if (!searchQuery) return true;
@@ -13,6 +14,63 @@
       b.author.toLowerCase().includes(q)
     );
   });
+
+  $: {
+    for (const b of $library) {
+      if (b.format === 'pdf' && !b.cover_base64 && !generatingCovers.has(b.id)) {
+        generatingCovers.add(b.id);
+        generatePDFCover(b);
+      }
+    }
+  }
+
+  async function generatePDFCover(book) {
+    try {
+      const pdfjsLib = await import('pdfjs-dist');
+      const pdfjsWorker = (await import('pdfjs-dist/build/pdf.worker.min.js?url')).default;
+      pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+
+      const data = await getPDFData(book.id);
+      if (!data) return;
+
+      const loadingTask = pdfjsLib.getDocument({
+        data,
+        cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+        cMapPacked: true,
+      });
+
+      const doc = await loadingTask.promise;
+      const page = await doc.getPage(1);
+
+      const viewport = page.getViewport({ scale: 1.0 });
+      const scale = 400 / viewport.width;
+      const scaledViewport = page.getViewport({ scale });
+
+      const canvas = document.createElement('canvas');
+      canvas.width = scaledViewport.width;
+      canvas.height = scaledViewport.height;
+      const ctx = canvas.getContext('2d');
+
+      await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+
+      // Extract as JPEG base64 (remove the prefix because backend usually expects raw base64, but Svelte bindings pass strings. Actually wait!
+      // Does BookCard expect the full 'data:image/jpeg;base64,...' string? Yes, `src={book.cover_base64}`.
+      const base64 = canvas.toDataURL('image/jpeg', 0.8);
+      await updateBookCover(book.id, base64);
+
+      library.update(lib => {
+        const idx = lib.findIndex(l => l.id === book.id);
+        if (idx !== -1) {
+          lib[idx].cover_base64 = base64;
+        }
+        return lib;
+      });
+
+      doc.destroy();
+    } catch (e) {
+      console.error('Failed to generate cover for', book.title, e);
+    }
+  }
 
   async function handleAddFolder() {
     const dir = await selectFolder();

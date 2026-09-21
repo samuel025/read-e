@@ -125,6 +125,11 @@ func (s *Store) UpsertBook(b library.BookMeta) error {
 	return err
 }
 
+func (s *Store) UpdateBookCover(id string, coverBase64 string) error {
+	_, err := s.db.Exec("UPDATE books SET cover_base64 = ? WHERE id = ?", coverBase64, id)
+	return err
+}
+
 func (s *Store) GetBooks() ([]library.BookMeta, error) {
 	rows, err := s.db.Query(`
 		SELECT b.id, b.title, b.author, b.file_path, b.cover_base64, b.format, b.added_at,
