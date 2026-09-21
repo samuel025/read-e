@@ -8,6 +8,7 @@ type BookInfo struct {
 	Language    string `json:"language"`
 	CoverBase64 string `json:"coverBase64"`
 	SpineCount  int    `json:"spineCount"`
+	Format      string `json:"format"`
 }
 
 type TOCEntry struct {

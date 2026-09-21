@@ -2,9 +2,10 @@
   import { onMount, onDestroy } from 'svelte';
   import {
     searchOpen, currentBookId, currentBook, currentSpineIndex,
-    currentChapter
+    currentChapter, pdfDoc
   } from '../stores/app.js';
   import { searchBook, getChapter, saveProgress } from './api.js';
+  import { searchPDF } from './pdfSearch.js';
 
   let inputEl;
   let query = '';
@@ -32,8 +33,13 @@
       return;
     }
     try {
-      const res = await searchBook($currentBookId, query.trim());
-      results = res || [];
+      if ($currentBook?.format === 'pdf') {
+        const res = await searchPDF($pdfDoc, query.trim());
+        results = res || [];
+      } else {
+        const res = await searchBook($currentBookId, query.trim());
+        results = res || [];
+      }
       selectedIndex = 0;
     } finally {
       searching = false;
@@ -45,6 +51,14 @@
     if (!bookId) return;
 
     searchOpen.set(false);
+
+    if ($currentBook?.format === 'pdf') {
+      currentSpineIndex.set(r.spineIndex);
+      window.dispatchEvent(new CustomEvent('pdf-find-and-scroll', {
+        detail: { pageIndex: r.spineIndex, query: query.trim() }
+      }));
+      return;
+    }
 
     if ($currentSpineIndex !== r.spineIndex) {
       currentSpineIndex.set(r.spineIndex);

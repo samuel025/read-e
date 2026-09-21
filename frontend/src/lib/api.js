@@ -146,3 +146,24 @@ export async function getChapterWordCount(bookID, spineIndex) {
   if (!go) return 0;
   return go.GetChapterWordCount(bookID, spineIndex);
 }
+
+export async function getPDFData(bookID) {
+  const go = getGoBinding();
+  if (!go) return null;
+  const res = await go.GetPDFData(bookID);
+  if (!res) return null;
+  if (typeof res === 'string') {
+    const binaryString = atob(res);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+  }
+  if (Array.isArray(res)) {
+    return new Uint8Array(res);
+  }
+  return res;
+}
+

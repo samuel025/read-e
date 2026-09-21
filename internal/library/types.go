@@ -10,4 +10,5 @@ type BookMeta struct {
 	CoverBase64 string    `json:"coverBase64"`
 	AddedAt     time.Time `json:"addedAt"`
 	HasProgress bool      `json:"hasProgress"`
+	Format      string    `json:"format"`
 }

@@ -1284,6 +1284,22 @@
               jumpToHighlightWithRetry(e.data.highlightId, e.data.text, 0);
             } else if (e.data.type === 'scroll-to-offset') {
               scrollToOffsetWithRetry(e.data.offset, 0);
+            } else if (e.data.type === 'scroll-to-hash') {
+              var hash = e.data.hash;
+              if (hash) {
+                var target = document.getElementById(hash) || document.querySelector('[name="' + CSS.escape(hash) + '"]') || document.querySelector('#' + CSS.escape(hash));
+                if (target) {
+                  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                  target.classList.remove('reader-target-highlight');
+                  void target.offsetWidth;
+                  target.classList.add('reader-target-highlight');
+                  setTimeout(function() {
+                    target.classList.remove('reader-target-highlight');
+                  }, 1800);
+                }
+              }
+            } else if (e.data.type === 'scroll-to-top') {
+              window.scrollTo({ top: 0, behavior: 'smooth' });
             } else if (e.data.type === 'remove-highlight-mark') {
               var allMarks = document.querySelectorAll('mark[data-highlight-id="' + e.data.highlightId + '"]');
               for (var m = 0; m < allMarks.length; m++) {
@@ -1403,26 +1419,54 @@
     }
   }
 
+  let pendingHash = null;
+
+  function handleScrollToHash(e) {
+    const hash = e.detail?.hash;
+    if (!hash) return;
+    if (iframeEl?.contentWindow) {
+      iframeEl.contentWindow.postMessage({ type: 'scroll-to-hash', hash }, '*');
+    } else {
+      pendingHash = hash;
+    }
+  }
+
+  function handleScrollToTop() {
+    if (iframeEl?.contentWindow) {
+      iframeEl.contentWindow.postMessage({ type: 'scroll-to-top' }, '*');
+    }
+  }
+
   onMount(() => {
     window.addEventListener('keydown', handleKeydown);
     window.addEventListener('message', handleWindowMessage);
+    window.addEventListener('epub-scroll-to-hash', handleScrollToHash);
+    window.addEventListener('epub-scroll-to-top', handleScrollToTop);
     return () => {
       window.removeEventListener('keydown', handleKeydown);
       window.removeEventListener('message', handleWindowMessage);
+      window.removeEventListener('epub-scroll-to-hash', handleScrollToHash);
+      window.removeEventListener('epub-scroll-to-top', handleScrollToTop);
     };
   });
 
   function handleIframeLoad() {
     if (!iframeEl?.contentWindow) return;
 
-    // Restore scroll position
-    getProgress($currentBookId).then((pos) => {
-      if (pos?.scrollOffset && iframeEl?.contentWindow) {
-        iframeEl.contentWindow.scrollTo(0, pos.scrollOffset);
-      }
-    });
+    if (pendingHash) {
+      const h = pendingHash;
+      pendingHash = null;
+      setTimeout(() => {
+        iframeEl?.contentWindow?.postMessage({ type: 'scroll-to-hash', hash: h }, '*');
+      }, 100);
+    } else {
+      getProgress($currentBookId).then((pos) => {
+        if (pos?.scrollOffset && iframeEl?.contentWindow) {
+          iframeEl.contentWindow.scrollTo(0, pos.scrollOffset);
+        }
+      });
+    }
 
-    // Send highlights to newly loaded iframe
     if ($currentBookId) {
       const chHighlights = $highlights.filter(h => h.bookId === $currentBookId && h.spineIndex === $currentSpineIndex);
       iframeEl.contentWindow.postMessage({

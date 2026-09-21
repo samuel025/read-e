@@ -1,25 +1,105 @@
 <script>
   import {
-    toc, currentSpineIndex, currentBookId, currentChapter,
+    toc, currentSpineIndex, currentBookId, currentBook, currentChapter,
     activeSidebarTab, highlights, bookmarks
   } from '../stores/app.js';
   import { getChapter, saveProgress, getHighlights, getBookmarks } from './api.js';
   import HighlightsSidebar from './HighlightsSidebar.svelte';
   import BookmarksSidebar from './BookmarksSidebar.svelte';
 
-  async function navigateTo(spineIndex) {
+  let selectedKey = null;
+
+  function getEntryKey(item) {
+    if (!item) return '';
+    return item.href || `${item.spineIndex}_${item.title}`;
+  }
+
+  function determineActiveKey(tocList, spineIdx, userSelectedKey) {
+    if (!tocList || tocList.length === 0 || spineIdx === undefined) return null;
+
+    let hasSelectedMatchingSpine = false;
+    function checkSelected(entries) {
+      for (const e of entries) {
+        if (getEntryKey(e) === userSelectedKey && e.spineIndex === spineIdx) {
+          hasSelectedMatchingSpine = true;
+          return;
+        }
+        if (e.children && e.children.length > 0) {
+          checkSelected(e.children);
+          if (hasSelectedMatchingSpine) return;
+        }
+      }
+    }
+    if (userSelectedKey) {
+      checkSelected(tocList);
+      if (hasSelectedMatchingSpine) return userSelectedKey;
+    }
+
+    let firstMatch = null;
+    function findFirst(entries) {
+      for (const e of entries) {
+        if (e.spineIndex === spineIdx) {
+          firstMatch = getEntryKey(e);
+          return;
+        }
+        if (e.children && e.children.length > 0) {
+          findFirst(e.children);
+          if (firstMatch) return;
+        }
+      }
+    }
+    findFirst(tocList);
+    return firstMatch;
+  }
+
+  $: activeKey = determineActiveKey($toc, $currentSpineIndex, selectedKey);
+
+  async function navigateTo(entry) {
     const bookId = $currentBookId;
-    if (!bookId) return;
+    if (!bookId || !entry) return;
+
+    selectedKey = getEntryKey(entry);
+    const spineIndex = entry.spineIndex;
+
+    if ($currentBook?.format === 'pdf') {
+      window.dispatchEvent(new CustomEvent('pdf-scroll-to-toc', {
+        detail: {
+          pageIndex: spineIndex,
+          title: entry.title,
+          href: entry.href
+        }
+      }));
+      return;
+    }
+
+    const hash = entry.href && entry.href.includes('#') ? entry.href.split('#')[1] : null;
+
+    if ($currentSpineIndex === spineIndex) {
+      if (hash) {
+        window.dispatchEvent(new CustomEvent('epub-scroll-to-hash', {
+          detail: { hash }
+        }));
+      } else {
+        window.dispatchEvent(new CustomEvent('epub-scroll-to-top'));
+      }
+      return;
+    }
 
     currentSpineIndex.set(spineIndex);
-
     const html = await getChapter(bookId, spineIndex);
     currentChapter.set(html);
 
-    saveProgress(bookId, spineIndex, 0);
+    if (hash) {
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('epub-scroll-to-hash', {
+          detail: { hash }
+        }));
+      }, 150);
+    } else {
+      saveProgress(bookId, spineIndex, 0);
+    }
   }
 
-  // Load highlights & bookmarks when book changes
   $: if ($currentBookId) {
     getHighlights($currentBookId).then((items) => {
       highlights.set(items || []);
@@ -79,8 +159,8 @@
             <li>
               <button
                 class="toc-entry"
-                class:active={$currentSpineIndex === entry.spineIndex}
-                on:click={() => navigateTo(entry.spineIndex)}
+                class:active={activeKey === getEntryKey(entry)}
+                on:click={() => navigateTo(entry)}
               >
                 <span class="toc-entry-title">{entry.title}</span>
               </button>
@@ -90,8 +170,8 @@
                     <li>
                       <button
                         class="toc-entry toc-child"
-                        class:active={$currentSpineIndex === child.spineIndex}
-                        on:click={() => navigateTo(child.spineIndex)}
+                        class:active={activeKey === getEntryKey(child)}
+                        on:click={() => navigateTo(child)}
                       >
                         <span class="toc-entry-title">{child.title}</span>
                       </button>

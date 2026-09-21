@@ -21,7 +21,8 @@ func ScanFolder(folderPath string) ([]BookMeta, error) {
 		if info.IsDir() {
 			return nil
 		}
-		if !strings.HasSuffix(strings.ToLower(info.Name()), ".epub") {
+		ext := strings.ToLower(filepath.Ext(info.Name()))
+		if ext != ".epub" && ext != ".pdf" {
 			return nil
 		}
 
@@ -43,6 +44,24 @@ func ScanFile(filePath string) (BookMeta, error) {
 }
 
 func extractMeta(filePath string) (BookMeta, error) {
+	absPath, _ := filepath.Abs(filePath)
+	hash := sha256.Sum256([]byte(absPath))
+	id := fmt.Sprintf("%x", hash[:8])
+	ext := strings.ToLower(filepath.Ext(filePath))
+
+	if ext == ".pdf" {
+		title := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+		return BookMeta{
+			ID:          id,
+			Title:       title,
+			Author:      "",
+			FilePath:    absPath,
+			CoverBase64: "",
+			Format:      "pdf",
+			AddedAt:     time.Now(),
+		}, nil
+	}
+
 	reader, err := epub.Open(filePath)
 	if err != nil {
 		return BookMeta{}, err
@@ -50,10 +69,6 @@ func extractMeta(filePath string) (BookMeta, error) {
 	defer reader.Close()
 
 	info := reader.Info()
-
-	absPath, _ := filepath.Abs(filePath)
-	hash := sha256.Sum256([]byte(absPath))
-	id := fmt.Sprintf("%x", hash[:8])
 
 	title := info.Title
 	if title == "" {
@@ -66,6 +81,7 @@ func extractMeta(filePath string) (BookMeta, error) {
 		Author:      info.Author,
 		FilePath:    absPath,
 		CoverBase64: info.CoverBase64,
+		Format:      "epub",
 		AddedAt:     time.Now(),
 	}, nil
 }

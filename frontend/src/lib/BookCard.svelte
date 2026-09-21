@@ -18,6 +18,14 @@
     try {
       const info = await openBook(book.id);
       currentBook.set(info);
+
+      if (info.format === 'pdf') {
+        const highlightsData = await getHighlights(book.id);
+        highlights.set(highlightsData || []);
+        view.set('reader');
+        return;
+      }
+
       spineCount.set(info.spineCount);
 
       const tocData = await getTOC(book.id);
@@ -77,6 +85,10 @@
       <div class="cover-placeholder" style="background: {getGradient(book.title)}">
         <span class="placeholder-title">{book.title.slice(0, 2).toUpperCase()}</span>
       </div>
+    {/if}
+
+    {#if book.format === 'pdf'}
+      <div class="format-badge">PDF</div>
     {/if}
 
     {#if book.hasProgress}
@@ -162,6 +174,22 @@
     font-weight: 700;
     color: rgba(255, 255, 255, 0.6);
     letter-spacing: 0.05em;
+  }
+
+  .format-badge {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: #f8fafc;
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
   }
 
   .progress-badge {

@@ -1,12 +1,12 @@
-# Read-e: Desktop EPUB Reader
+# Read-e: Desktop EPUB & PDF Reader
 
-A desktop EPUB reader and personal reading companion engineered with Go, Wails v2, and Svelte. Designed for speed, typography control, and friction-free note-taking with native export compatibility for knowledge management tools such as Obsidian, Notion, and Roam Research.
+A desktop e-book and document reader and personal reading companion engineered with Go, Wails v2, and Svelte. Designed for speed, typography control, and friction-free note-taking with native export compatibility for knowledge management tools such as Obsidian, Notion, and Roam Research.
 
 ---
 
 ## Overview
 
-Read-e provides a distraction-free, native desktop reading environment that balances performance with typographic polish. Built on top of a lightweight Go parsing engine and SQLite persistence layer, it handles complex EPUB 2 and EPUB 3 structures, rich media, and mathematical or structured footnotes without external cloud dependencies.
+Read-e provides a distraction-free, native desktop reading environment that balances performance with typographic polish. Built on top of a lightweight Go parsing engine and SQLite persistence layer, it handles complex EPUB 2/3 structures, rich media, and standard PDF documents without external cloud dependencies.
 
 All data, including book metadata, reading progress, highlights, notes, and bookmarks, is stored locally in an embedded SQLite database configured with Write-Ahead Logging (WAL) and strict relational integrity.
 
@@ -14,29 +14,35 @@ All data, including book metadata, reading progress, highlights, notes, and book
 
 ## Key Features
 
+### Document Support
+- EPUB Format: Complete EPUB 2 and EPUB 3 support with chapter unpacking, spine sequencing, NCX/Nav table of contents extraction, and embedded asset serving.
+- PDF Format: Native PDF document viewing with high-DPI canvas rendering, interactive Mozilla PDF.js text layer selection, outline extraction, and continuous scrolling.
+
 ### Reader Experience and Typography
-- Layout and Width Controls: Custom reading width slider (560px to 960px) to adjust character line lengths for optimal eye tracking.
+- Layout and Width Controls: Custom reading width slider (560px to 960px) to adjust character line lengths for optimal eye tracking in EPUB documents.
+- PDF Zoom Controls: Flexible document scaling (Fit to Width, Fit to Page, 50% to 250% zoom increments) accessible from the primary toolbar.
 - Line Height and Spacing: Selectable line spacing presets (Compact 1.5, Standard 1.7, Relaxed 1.9).
 - Text Alignment and Hyphenation: Toggle between ragged-right left alignment and justified text with automated browser hyphenation.
 - Font Configuration: Choice of system, sans-serif (Inter), serif (Merriweather), and monospace typefaces with fine-grained font size scaling.
 - Theme Palettes: Four color schemes engineered for reading comfort: Dark, Light, Sepia, and Nord.
 
 ### Annotations, Highlights, and Notes
-- Multi-Color Text Highlighting: Highlight passages across single or multiple DOM nodes in five curated contrast colors (Yellow, Green, Blue, Purple, Pink).
+- Multi-Color Text Highlighting: Highlight passages across single or multiple DOM nodes in five curated contrast colors (Yellow, Green, Blue, Purple, Pink) across both EPUB and PDF documents.
 - Attached Annotations: Attach reflections and notes directly to any highlight via an inline editor or within the reader sidebar.
-- Obsidian and Notion Markdown Export: Grouped export of all book highlights and notes structured chronologically by chapter, ready for immediate clipboard copy or `.md` file download.
+- Obsidian and Notion Markdown Export: Grouped export of all book highlights and notes structured chronologically by chapter or page, ready for immediate clipboard copy or `.md` file download.
 
 ### Navigation and Reading Tools
-- In-Place Footnote Popovers: Clicking footnote or endnote anchors renders an Apple Books-inspired popover preview directly beside the text reference, preserving the reader's vertical scroll position.
-- In-Book Fast Search: Global search overlay (`Ctrl+F` / `Cmd+F`) that indexes and searches across all spine chapters in memory with match previews and one-click jump navigation.
+- In-Place Footnote Popovers: Clicking footnote or endnote anchors in EPUBs renders an Apple Books-inspired popover preview directly beside the text reference, preserving the reader's vertical scroll position.
+- In-Book Fast Search: Global search overlay (`Ctrl+F` / `Cmd+F`) that indexes and searches across all EPUB chapters and PDF pages in memory with match previews and one-click jump navigation.
 - Bookmark Management: Quick-toggle bookmark button and shortcut (`Ctrl+D` / `Cmd+D`) with exact scroll-offset restoration and a dedicated Bookmarks drawer.
-- Reading Statistics and Pacing: Real-time chapter word-count calculation displaying estimated reading time remaining based on a standard 220 WPM pacing model.
-- Table of Contents: Complete hierarchy navigation supporting nested sections, chapters, and sub-chapters.
+- Reading Statistics and Pacing: Real-time chapter and document word-count calculation displaying estimated reading time remaining based on a standard 220 WPM pacing model.
+- Table of Contents: Complete hierarchy navigation supporting nested sections, chapters, and PDF bookmarks.
 
 ### Library Management
-- Local File Import: Add individual `.epub` files or recursively scan local directories.
+- Local File Import: Add individual `.epub` or `.pdf` files, or recursively scan local directories.
 - Automated Cover Extraction: Multi-tier cover discovery supporting OPF manifest properties, metadata identifiers, and structural heuristics.
-- Progress Tracking: Continuous, background persistence of chapter index and vertical scroll offset.
+- Format Indicators: Visual document format badges for clear distinction between EPUB and PDF library items.
+- Progress Tracking: Continuous, background persistence of chapter or page index and vertical scroll offset.
 
 ---
 

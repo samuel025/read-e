@@ -59,6 +59,14 @@
     const bookId = $currentBookId;
     if (!bookId) return;
 
+    if ($currentBook?.format === 'pdf') {
+      currentSpineIndex.set(h.spineIndex);
+      window.dispatchEvent(new CustomEvent('pdf-jump-to-highlight', {
+        detail: h
+      }));
+      return;
+    }
+
     const switchedChapter = $currentSpineIndex !== h.spineIndex;
     if (switchedChapter) {
       currentSpineIndex.set(h.spineIndex);
@@ -84,6 +92,13 @@
     e.stopPropagation();
     await deleteHighlight(id);
     highlights.update(items => items.filter(item => item.id !== id));
+
+    if ($currentBook?.format === 'pdf') {
+      window.dispatchEvent(new CustomEvent('pdf-remove-highlight', {
+        detail: { highlightId: id }
+      }));
+      return;
+    }
 
     const iframe = document.querySelector('.chapter-frame');
     if (iframe?.contentWindow) {

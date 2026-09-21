@@ -111,11 +111,22 @@ func (a *App) RemoveBook(bookID string) error {
 }
 
 func (a *App) OpenBook(bookID string) (epub.BookInfo, error) {
+	meta, err := a.store.GetBook(bookID)
+	if err == nil && meta.Format == "pdf" {
+		return epub.BookInfo{
+			Title:  meta.Title,
+			Author: meta.Author,
+			Format: "pdf",
+		}, nil
+	}
+
 	reader, err := a.getReader(bookID)
 	if err != nil {
 		return epub.BookInfo{}, err
 	}
-	return reader.Info(), nil
+	info := reader.Info()
+	info.Format = "epub"
+	return info, nil
 }
 
 func (a *App) GetTOC(bookID string) ([]epub.TOCEntry, error) {
@@ -237,12 +248,33 @@ func (a *App) SelectFolder() (string, error) {
 
 func (a *App) SelectFile() (string, error) {
 	file, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Select EPUB File",
+		Title: "Select Book File",
 		Filters: []runtime.FileFilter{
-			{DisplayName: "EPUB Files", Pattern: "*.epub"},
+			{DisplayName: "Books and Documents (*.epub, *.pdf)", Pattern: "*.epub;*.pdf"},
+			{DisplayName: "EPUB Files (*.epub)", Pattern: "*.epub"},
+			{DisplayName: "PDF Documents (*.pdf)", Pattern: "*.pdf"},
 		},
 	})
 	return file, err
+}
+
+func (a *App) GetPDFData(bookID string) ([]byte, error) {
+	meta, err := a.store.GetBook(bookID)
+	filePath := ""
+	if err == nil && meta.FilePath != "" {
+		filePath = meta.FilePath
+	} else {
+		a.mu.Lock()
+		p, ok := a.bookPaths[bookID]
+		a.mu.Unlock()
+		if ok {
+			filePath = p
+		}
+	}
+	if filePath == "" {
+		return nil, fmt.Errorf("book %q not found", bookID)
+	}
+	return os.ReadFile(filePath)
 }
 
 func (a *App) getReader(bookID string) (*epub.Reader, error) {

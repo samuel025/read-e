@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -54,6 +55,7 @@ func (s *Store) migrate() error {
 		author TEXT NOT NULL DEFAULT '',
 		file_path TEXT NOT NULL UNIQUE,
 		cover_base64 TEXT NOT NULL DEFAULT '',
+		format TEXT NOT NULL DEFAULT 'epub',
 		added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE TABLE IF NOT EXISTS progress (
@@ -91,26 +93,41 @@ func (s *Store) migrate() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_bookmarks_book ON bookmarks(book_id, spine_index);
 	`
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+
+	// Safely add format column if migrating existing database
+	_, _ = s.db.Exec("ALTER TABLE books ADD COLUMN format TEXT NOT NULL DEFAULT 'epub';")
+
+	return nil
 }
 
 func (s *Store) UpsertBook(b library.BookMeta) error {
+	format := b.Format
+	if format == "" {
+		if strings.HasSuffix(strings.ToLower(b.FilePath), ".pdf") {
+			format = "pdf"
+		} else {
+			format = "epub"
+		}
+	}
 	_, err := s.db.Exec(`
-		INSERT INTO books (id, title, author, file_path, cover_base64, added_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		INSERT INTO books (id, title, author, file_path, cover_base64, format, added_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title = excluded.title,
 			author = excluded.author,
 			file_path = excluded.file_path,
-			cover_base64 = excluded.cover_base64
-	`, b.ID, b.Title, b.Author, b.FilePath, b.CoverBase64, b.AddedAt)
+			cover_base64 = excluded.cover_base64,
+			format = excluded.format
+	`, b.ID, b.Title, b.Author, b.FilePath, b.CoverBase64, format, b.AddedAt)
 	return err
 }
 
 func (s *Store) GetBooks() ([]library.BookMeta, error) {
 	rows, err := s.db.Query(`
-		SELECT b.id, b.title, b.author, b.file_path, b.cover_base64, b.added_at,
+		SELECT b.id, b.title, b.author, b.file_path, b.cover_base64, b.format, b.added_at,
 		       CASE WHEN p.book_id IS NOT NULL THEN 1 ELSE 0 END as has_progress
 		FROM books b
 		LEFT JOIN progress p ON b.id = p.book_id
@@ -125,13 +142,23 @@ func (s *Store) GetBooks() ([]library.BookMeta, error) {
 	for rows.Next() {
 		var b library.BookMeta
 		var hasProgress int
-		if err := rows.Scan(&b.ID, &b.Title, &b.Author, &b.FilePath, &b.CoverBase64, &b.AddedAt, &hasProgress); err != nil {
+		if err := rows.Scan(&b.ID, &b.Title, &b.Author, &b.FilePath, &b.CoverBase64, &b.Format, &b.AddedAt, &hasProgress); err != nil {
 			return nil, err
 		}
 		b.HasProgress = hasProgress == 1
 		books = append(books, b)
 	}
 	return books, rows.Err()
+}
+
+func (s *Store) GetBook(bookID string) (library.BookMeta, error) {
+	var b library.BookMeta
+	err := s.db.QueryRow(`
+		SELECT id, title, author, file_path, cover_base64, format, added_at
+		FROM books
+		WHERE id = ?
+	`, bookID).Scan(&b.ID, &b.Title, &b.Author, &b.FilePath, &b.CoverBase64, &b.Format, &b.AddedAt)
+	return b, err
 }
 
 func (s *Store) RemoveBook(bookID string) error {

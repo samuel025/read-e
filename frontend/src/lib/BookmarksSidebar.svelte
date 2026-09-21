@@ -1,6 +1,6 @@
 <script>
   import {
-    bookmarks, currentBookId, currentSpineIndex,
+    bookmarks, currentBook, currentBookId, currentSpineIndex,
     currentChapter, toc
   } from '../stores/app.js';
   import { deleteBookmark, getChapter, saveProgress } from './api.js';
@@ -35,6 +35,15 @@
   async function jumpToBookmark(bm) {
     const bookId = $currentBookId;
     if (!bookId) return;
+
+    if ($currentBook?.format === 'pdf') {
+      currentSpineIndex.set(bm.spineIndex);
+      saveProgress(bookId, bm.spineIndex, bm.scrollOffset);
+      window.dispatchEvent(new CustomEvent('pdf-scroll-to-bookmark', {
+        detail: { pageIndex: bm.spineIndex, scrollOffset: bm.scrollOffset }
+      }));
+      return;
+    }
 
     const switched = $currentSpineIndex !== bm.spineIndex;
     if (switched) {

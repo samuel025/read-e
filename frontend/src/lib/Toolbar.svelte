@@ -2,7 +2,8 @@
   import {
     view, currentBook, currentBookId, currentSpineIndex,
     spineCount, tocOpen, settings, settingsOpen,
-    activeSidebarTab, highlights, bookmarks, searchOpen, toc
+    activeSidebarTab, highlights, bookmarks, searchOpen, toc,
+    pdfZoom, readingStats
   } from '../stores/app.js';
   import {
     saveSettings, saveBookmark, deleteBookmark,
@@ -25,7 +26,7 @@
     return findTitle($toc) || `Chapter ${spineIndex + 1}`;
   }
 
-  $: if ($currentBookId && $currentSpineIndex !== undefined) {
+  $: if ($currentBookId && $currentSpineIndex !== undefined && $currentBook?.format !== 'pdf') {
     loadReadingStats($currentBookId, $currentSpineIndex);
   }
 
@@ -42,6 +43,7 @@
     }
   }
 
+  $: displayMinutes = $currentBook?.format === 'pdf' ? $readingStats.minutesLeft : chapterMinutes;
   $: currentBookmark = $bookmarks.find(b => b.spineIndex === $currentSpineIndex);
   $: isBookmarked = !!currentBookmark;
 
@@ -52,9 +54,17 @@
       await deleteBookmark(currentBookmark.id);
       bookmarks.update(items => items.filter(b => b.id !== currentBookmark.id));
     } else {
-      const iframe = document.querySelector('.chapter-frame');
-      const scrollY = iframe?.contentWindow?.scrollY || iframe?.contentWindow?.document?.documentElement?.scrollTop || 0;
-      const title = getChapterTitle($currentSpineIndex);
+      let scrollY = 0;
+      let title = '';
+      if ($currentBook?.format === 'pdf') {
+        const pdfContainer = document.querySelector('.pdf-viewport');
+        scrollY = pdfContainer ? pdfContainer.scrollTop : 0;
+        title = `Page ${$currentSpineIndex + 1}`;
+      } else {
+        const iframe = document.querySelector('.chapter-frame');
+        scrollY = iframe?.contentWindow?.scrollY || iframe?.contentWindow?.document?.documentElement?.scrollTop || 0;
+        title = getChapterTitle($currentSpineIndex);
+      }
 
       const newBm = {
         id: crypto.randomUUID ? crypto.randomUUID() : 'bm_' + Date.now(),
@@ -129,12 +139,6 @@
       return updated;
     });
   }
-
-  const themeIcons = {
-    dark: '🌙',
-    light: '☀️',
-    sepia: '📜',
-  };
 </script>
 
 <header class="toolbar">
@@ -171,7 +175,7 @@
 
   <div class="toolbar-center">
     <span class="chapter-indicator">
-      {$currentSpineIndex + 1} / {$spineCount}
+      {$currentBook?.format === 'pdf' ? `Page ${$currentSpineIndex + 1}` : ($currentSpineIndex + 1)} / {$spineCount}
     </span>
     <div class="progress-bar-container">
       <div
@@ -179,10 +183,13 @@
         style="width: {$spineCount > 0 ? (($currentSpineIndex + 1) / $spineCount) * 100 : 0}%"
       ></div>
     </div>
-    {#if chapterMinutes}
+    {#if displayMinutes}
       <div class="reading-pill" title="Estimated reading time at 220 WPM">
-        <span class="pill-clock">⏱</span>
-        <span>~{chapterMinutes}m left</span>
+        <svg class="pill-clock-svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg>
+        <span>~{displayMinutes}m left</span>
       </div>
     {/if}
   </div>
@@ -201,7 +208,7 @@
       class="btn btn-ghost btn-icon ribbon-btn"
       class:bookmarked={isBookmarked}
       on:click={toggleBookmark}
-      title={isBookmarked ? "Remove bookmark (Cmd+D)" : "Bookmark this chapter (Cmd+D)"}
+      title={isBookmarked ? "Remove bookmark (Cmd+D)" : "Bookmark this location (Cmd+D)"}
       id="ribbon-btn"
     >
       <svg width="17" height="17" viewBox="0 0 24 24" fill={isBookmarked ? "var(--accent)" : "none"} stroke={isBookmarked ? "var(--accent)" : "currentColor"} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -211,22 +218,83 @@
 
     <div class="toolbar-divider"></div>
 
-    <button class="btn btn-ghost btn-icon" on:click={() => changeFontSize(-0.1)} title="Decrease font size" id="font-decrease-btn">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M5 12h14"/>
-      </svg>
-    </button>
-    <span class="font-size-label">{Math.round($settings.fontSize * 100)}%</span>
-    <button class="btn btn-ghost btn-icon" on:click={() => changeFontSize(0.1)} title="Increase font size" id="font-increase-btn">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M5 12h14"/><path d="M12 5v14"/>
-      </svg>
-    </button>
+    {#if $currentBook?.format === 'pdf'}
+      <!-- PDF Zoom Controls -->
+      <button
+        class="btn btn-ghost btn-icon"
+        on:click={() => window.dispatchEvent(new CustomEvent('pdf-zoom-out'))}
+        title="Zoom Out"
+        id="pdf-zoom-out-btn"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          <line x1="8" y1="11" x2="14" y2="11"></line>
+        </svg>
+      </button>
+
+      <button
+        class="btn btn-ghost btn-zoom-badge"
+        on:click={() => window.dispatchEvent(new CustomEvent('pdf-zoom-fit'))}
+        title="Fit to width"
+        id="pdf-zoom-badge"
+      >
+        {$pdfZoom === -1 ? 'Fit' : `${$pdfZoom}%`}
+      </button>
+
+      <button
+        class="btn btn-ghost btn-icon"
+        on:click={() => window.dispatchEvent(new CustomEvent('pdf-zoom-in'))}
+        title="Zoom In"
+        id="pdf-zoom-in-btn"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          <line x1="11" y1="8" x2="11" y2="14"></line>
+          <line x1="8" y1="11" x2="14" y2="11"></line>
+        </svg>
+      </button>
+    {:else}
+      <!-- EPUB Font Size Controls -->
+      <button class="btn btn-ghost btn-icon" on:click={() => changeFontSize(-0.1)} title="Decrease font size" id="font-decrease-btn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12h14"/>
+        </svg>
+      </button>
+      <span class="font-size-label">{Math.round($settings.fontSize * 100)}%</span>
+      <button class="btn btn-ghost btn-icon" on:click={() => changeFontSize(0.1)} title="Increase font size" id="font-increase-btn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12h14"/><path d="M12 5v14"/>
+        </svg>
+      </button>
+    {/if}
 
     <div class="toolbar-divider"></div>
 
     <button class="btn btn-ghost btn-icon" on:click={cycleTheme} title="Change theme ({$settings.theme})" id="theme-toggle-btn">
-      <span class="theme-emoji">{themeIcons[$settings.theme] || '🌙'}</span>
+      {#if $settings.theme === 'light'}
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="5"></circle>
+          <line x1="12" y1="1" x2="12" y2="3"></line>
+          <line x1="12" y1="21" x2="12" y2="23"></line>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+          <line x1="1" y1="12" x2="3" y2="12"></line>
+          <line x1="21" y1="12" x2="23" y2="12"></line>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+      {:else if $settings.theme === 'sepia'}
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+        </svg>
+      {:else}
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+      {/if}
     </button>
 
     <button class="btn btn-ghost btn-icon" on:click={openSettings} title="Reader Settings" id="settings-toggle-btn">
@@ -316,8 +384,7 @@
     letter-spacing: 0.01em;
   }
 
-  .pill-clock {
-    font-size: 0.75rem;
+  .pill-clock-svg {
     opacity: 0.8;
   }
 
@@ -330,16 +397,28 @@
     font-variant-numeric: tabular-nums;
   }
 
+  .btn-zoom-badge {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--fg-secondary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    min-width: 38px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+  }
+
+  .btn-zoom-badge:hover {
+    background: var(--bg-hover);
+    color: var(--fg-primary);
+  }
+
   .toolbar-divider {
     width: 1px;
     height: 18px;
     background: var(--border-subtle);
     margin: 0 2px;
-  }
-
-  .theme-emoji {
-    font-size: 0.9375rem;
-    line-height: 1;
   }
 
   .ribbon-btn.bookmarked {
