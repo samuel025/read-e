@@ -93,6 +93,11 @@ func (s *Store) migrate() error {
 		FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_bookmarks_book ON bookmarks(book_id, spine_index);
+	CREATE TABLE IF NOT EXISTS dictionary_cache (
+		word TEXT PRIMARY KEY,
+		data_json TEXT NOT NULL,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
 	`
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
@@ -519,3 +524,24 @@ func (s *Store) GetReadingInsights() (ReadingInsights, error) {
 
 	return insights, nil
 }
+
+// GetCachedDefinition returns the JSON-encoded definition for a word, or error if not cached
+func (s *Store) GetCachedDefinition(word string) (string, error) {
+	var dataJSON string
+	err := s.db.QueryRow(`SELECT data_json FROM dictionary_cache WHERE word = ?`, word).Scan(&dataJSON)
+	if err != nil {
+		return "", err
+	}
+	return dataJSON, nil
+}
+
+// SaveCachedDefinition caches a word's definition JSON into sqlite
+func (s *Store) SaveCachedDefinition(word string, dataJSON string) error {
+	_, err := s.db.Exec(`
+		INSERT INTO dictionary_cache (word, data_json, created_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(word) DO UPDATE SET data_json = excluded.data_json, created_at = CURRENT_TIMESTAMP
+	`, word, dataJSON)
+	return err
+}
+

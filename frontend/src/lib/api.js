@@ -209,3 +209,10 @@ export async function releaseMemory() {
   return go.ReleaseMemory();
 }
 
+export async function lookupWord(word) {
+  const go = getGoBinding();
+  if (!go || !go.LookupWord) return null;
+  return go.LookupWord(word);
+}
+
+

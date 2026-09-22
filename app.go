@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -12,6 +13,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"time"
 
 	"epub-reader/internal/epub"
 	"epub-reader/internal/library"
@@ -407,3 +409,140 @@ func (a *App) ReleaseMemory() {
 
 	debug.FreeOSMemory()
 }
+
+type DefinitionItem struct {
+	Definition string   `json:"definition"`
+	Example    string   `json:"example,omitempty"`
+	Synonyms   []string `json:"synonyms,omitempty"`
+}
+
+type MeaningItem struct {
+	PartOfSpeech string           `json:"partOfSpeech"`
+	Definitions  []DefinitionItem `json:"definitions"`
+	Synonyms     []string         `json:"synonyms,omitempty"`
+}
+
+type PhoneticItem struct {
+	Text  string `json:"text,omitempty"`
+	Audio string `json:"audio,omitempty"`
+}
+
+type DictionaryEntry struct {
+	Word      string         `json:"word"`
+	Phonetic  string         `json:"phonetic,omitempty"`
+	Phonetics []PhoneticItem `json:"phonetics,omitempty"`
+	Meanings  []MeaningItem  `json:"meanings"`
+	Cached    bool           `json:"cached"`
+}
+
+// LookupWord searches local SQLite cache first, then Free Dictionary API, caching results
+func (a *App) LookupWord(rawWord string) (*DictionaryEntry, error) {
+	cleanWord := strings.TrimSpace(rawWord)
+	cleanWord = strings.Trim(cleanWord, "\"'“”‘’.,;:!?()[]{}<>-—_`*~/\\")
+	cleanWord = strings.ToLower(cleanWord)
+	if cleanWord == "" || len(cleanWord) > 60 {
+		return nil, fmt.Errorf("invalid word")
+	}
+
+	// 1. Check local SQLite cache
+	cachedJSON, err := a.store.GetCachedDefinition(cleanWord)
+	if err == nil && cachedJSON != "" {
+		var entry DictionaryEntry
+		if jsonErr := json.Unmarshal([]byte(cachedJSON), &entry); jsonErr == nil {
+			entry.Cached = true
+			return &entry, nil
+		}
+	}
+
+	// 2. Query Free Dictionary API
+	apiURL := fmt.Sprintf("https://api.dictionaryapi.dev/api/v2/entries/en/%s", url.PathEscape(cleanWord))
+	client := &http.Client{Timeout: 4 * time.Second}
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("could not connect to dictionary service: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("no definition found for '%s'", cleanWord)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("dictionary returned status %d", resp.StatusCode)
+	}
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read dictionary response: %w", err)
+	}
+
+	var rawEntries []struct {
+		Word      string `json:"word"`
+		Phonetic  string `json:"phonetic"`
+		Phonetics []struct {
+			Text  string `json:"text"`
+			Audio string `json:"audio"`
+		} `json:"phonetics"`
+		Meanings []struct {
+			PartOfSpeech string `json:"partOfSpeech"`
+			Definitions  []struct {
+				Definition string   `json:"definition"`
+				Example    string   `json:"example"`
+				Synonyms   []string `json:"synonyms"`
+			} `json:"definitions"`
+			Synonyms []string `json:"synonyms"`
+		} `json:"meanings"`
+	}
+
+	if err := json.Unmarshal(bodyBytes, &rawEntries); err != nil || len(rawEntries) == 0 {
+		return nil, fmt.Errorf("no definition found for '%s'", cleanWord)
+	}
+
+	first := rawEntries[0]
+	entry := DictionaryEntry{
+		Word:     first.Word,
+		Phonetic: first.Phonetic,
+		Cached:   false,
+	}
+
+	// Extract phonetics
+	for _, p := range first.Phonetics {
+		if p.Audio != "" || p.Text != "" {
+			entry.Phonetics = append(entry.Phonetics, PhoneticItem{
+				Text:  p.Text,
+				Audio: p.Audio,
+			})
+		}
+	}
+	if entry.Phonetic == "" && len(entry.Phonetics) > 0 {
+		for _, p := range entry.Phonetics {
+			if p.Text != "" {
+				entry.Phonetic = p.Text
+				break
+			}
+		}
+	}
+
+	// Extract meanings
+	for _, m := range first.Meanings {
+		meaning := MeaningItem{
+			PartOfSpeech: m.PartOfSpeech,
+			Synonyms:     m.Synonyms,
+		}
+		for _, d := range m.Definitions {
+			meaning.Definitions = append(meaning.Definitions, DefinitionItem{
+				Definition: d.Definition,
+				Example:    d.Example,
+				Synonyms:   d.Synonyms,
+			})
+		}
+		entry.Meanings = append(entry.Meanings, meaning)
+	}
+
+	// 3. Persist to SQLite cache
+	if encoded, err := json.Marshal(entry); err == nil {
+		_ = a.store.SaveCachedDefinition(cleanWord, string(encoded))
+	}
+
+	return &entry, nil
+}
+

@@ -27,6 +27,7 @@
     updateBookTotalCount,
   } from './api.js';
   import { getDocumentPageTexts } from './pdfSearch.js';
+  import DictionaryPopover from './DictionaryPopover.svelte';
 
   pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
@@ -54,6 +55,7 @@
   let saveProgressTimer = null;
   let resizeObserver = null;
   let isRestoringPosition = false;
+  let activeDictionary = null;
 
   let selectionToolbar = {
     visible: false,
@@ -966,6 +968,20 @@
     selectionToolbar.visible = false;
   }
 
+  function openDictionaryFromSelection() {
+    if (!selectionToolbar.visible || !selectionToolbar.text) return;
+    const text = selectionToolbar.text.trim();
+    const firstWord = text.split(/\s+/)[0];
+    activeDictionary = {
+      word: firstWord,
+      x: selectionToolbar.x,
+      y: selectionToolbar.y,
+      placement: 'top'
+    };
+    window.getSelection()?.removeAllRanges();
+    selectionToolbar.visible = false;
+  }
+
   function changeHighlightColor(highlightId, newColor) {
     highlights.update((items) =>
       items.map((item) => (item.id === highlightId ? { ...item, color: newColor } : item))
@@ -1253,6 +1269,18 @@
 
       <button
         class="reader-icon-btn"
+        title="Define Word"
+        on:mousedown|preventDefault
+        on:click={openDictionaryFromSelection}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+        </svg>
+      </button>
+
+      <button
+        class="reader-icon-btn"
         title="Copy Text"
         on:mousedown|preventDefault
         on:click={copySelectedText}
@@ -1303,6 +1331,16 @@
         <button class="btn-save-note" on:click={saveNoteDraft}>Save</button>
       </div>
     </div>
+  {/if}
+
+  {#if activeDictionary}
+    <DictionaryPopover
+      word={activeDictionary.word}
+      x={activeDictionary.x}
+      y={activeDictionary.y}
+      placement={activeDictionary.placement}
+      on:close={() => { activeDictionary = null; }}
+    />
   {/if}
 </div>
 

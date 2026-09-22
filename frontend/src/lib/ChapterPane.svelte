@@ -9,9 +9,11 @@
     addHighlight, deleteHighlight, updateHighlightNote,
     saveBookmark, deleteBookmark, getHighlights
   } from './api.js';
+  import DictionaryPopover from './DictionaryPopover.svelte';
 
   let iframeEl;
   let loading = false;
+  let activeDictionary = null;
 
   async function navigate(delta) {
     const newIndex = $currentSpineIndex + delta;
@@ -1055,10 +1057,34 @@
                 menu.appendChild(btn);
               });
 
+              var div = document.createElement('div');
+              div.className = 'reader-menu-divider';
+              menu.appendChild(div);
+
+              var defBtn = document.createElement('button');
+              defBtn.className = 'reader-icon-btn';
+              defBtn.title = 'Define Word';
+              defBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>';
+              defBtn.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                var firstWord = selectedText.trim().split(/\\s+/)[0];
+                window.parent.postMessage({
+                  type: 'open-dictionary',
+                  word: firstWord,
+                  x: rect.left + (rect.width / 2),
+                  y: rect.top
+                }, '*');
+                sel.removeAllRanges();
+                removeMenu();
+              });
+              menu.appendChild(defBtn);
+
               document.body.appendChild(menu);
               activeMenu = menu;
 
-              var menuWidth = 160;
+              var menuWidth = 196;
               var top = rect.top + window.scrollY - 44;
               if (top < window.scrollY + 10) {
                 top = rect.bottom + window.scrollY + 8;
@@ -1149,6 +1175,29 @@
               var divider2 = document.createElement('div');
               divider2.className = 'reader-menu-divider';
               menu.appendChild(divider2);
+
+              var markDefBtn = document.createElement('button');
+              markDefBtn.className = 'reader-icon-btn';
+              markDefBtn.title = 'Define Word';
+              markDefBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>';
+              markDefBtn.addEventListener('mousedown', function(ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+
+                var firstWord = (mark.textContent || '').trim().split(/\\s+/)[0];
+                window.parent.postMessage({
+                  type: 'open-dictionary',
+                  word: firstWord,
+                  x: rect.left + (rect.width / 2),
+                  y: rect.top
+                }, '*');
+                removeMenu();
+              });
+              menu.appendChild(markDefBtn);
+
+              var divider3 = document.createElement('div');
+              divider3.className = 'reader-menu-divider';
+              menu.appendChild(divider3);
 
               var delBtn = document.createElement('button');
               delBtn.className = 'reader-delete-btn';
@@ -1416,6 +1465,15 @@
       searchOpen.set(true);
     } else if (e.data.type === 'toggle-bookmark-shortcut') {
       toggleCurrentBookmark();
+    } else if (e.data.type === 'open-dictionary') {
+      const { word, x, y } = e.data;
+      const iframeRect = iframeEl ? iframeEl.getBoundingClientRect() : { left: 0, top: 0 };
+      activeDictionary = {
+        word,
+        x: Math.round(iframeRect.left + x),
+        y: Math.round(iframeRect.top + y),
+        placement: 'top'
+      };
     }
   }
 
@@ -1563,6 +1621,16 @@
       </svg>
     </button>
   </div>
+
+  {#if activeDictionary}
+    <DictionaryPopover
+      word={activeDictionary.word}
+      x={activeDictionary.x}
+      y={activeDictionary.y}
+      placement={activeDictionary.placement}
+      on:close={() => { activeDictionary = null; }}
+    />
+  {/if}
 </div>
 
 <style>

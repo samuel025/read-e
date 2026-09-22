@@ -32,6 +32,7 @@ All data, including book metadata, reading progress, highlights, notes, and book
 - Obsidian and Notion Markdown Export: Grouped export of all book highlights and notes structured chronologically by chapter or page, ready for immediate clipboard copy or `.md` file download.
 
 ### Navigation and Reading Tools
+- Instant Dictionary Lookup: Highlight or select any word in EPUB or PDF documents to open an integrated definition card with phonetic spelling, audio pronunciation, part-of-speech groupings, numbered definitions, examples, clickable synonyms, and automatic offline SQLite caching.
 - In-Place Footnote Popovers: Clicking footnote or endnote anchors in EPUBs renders an Apple Books-inspired popover preview directly beside the text reference, preserving the reader's vertical scroll position.
 - In-Book Fast Search: Global search overlay (`Ctrl+F` / `Cmd+F`) that indexes and searches across all EPUB chapters and PDF pages in memory with match previews and one-click jump navigation.
 - Bookmark Management: Quick-toggle bookmark button and shortcut (`Ctrl+D` / `Cmd+D`) with exact scroll-offset restoration and a dedicated Bookmarks drawer.
@@ -52,35 +53,6 @@ All data, including book metadata, reading progress, highlights, notes, and book
 
 ---
 
-## Architecture
-
-The application is structured into decoupled layers communicating through Wails v2 IPC:
-
-```
-+------------------------------------------------------------------+
-|                    Frontend (Svelte 4 + Vite)                    |
-|  - App Router & Global Overlays (SearchModal, SettingsPanel)     |
-|  - Insights Modal (Streaks, stats, 30-day activity heatmap)      |
-|  - Reader View (Toolbar, TOCSidebar, Bookmarks, Highlights)      |
-|  - Sandboxed Chapter Frame (In-place popovers, multi-node marks) |
-+---------------------------------+--------------------------------+
-                                  | Wails IPC Bridge
-+---------------------------------v--------------------------------+
-|                        Backend (Go 1.22+)                        |
-|  - app.go: API Gateway and Application Lifecycle                 |
-|  - internal/epub: EPUB 2/3 Unpacker, NCX/Nav Parser, Full Search |
-|  - internal/library: Filesystem Scanner and SHA-256 Book Hasher  |
-|  - internal/store: SQLite3 Database (WAL mode, Foreign Keys)     |
-+---------------------------------+--------------------------------+
-                                  |
-+---------------------------------v--------------------------------+
-|                   Local Storage & Persistence                    |
-|  - SQLite Database: ~/.config/read-e/library.db (Linux)          |
-|    or AppData/Roaming (Windows) / Application Support (macOS)    |
-+------------------------------------------------------------------+
-```
-
----
 
 ## Getting Started
 
