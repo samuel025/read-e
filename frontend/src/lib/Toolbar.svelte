@@ -3,7 +3,7 @@
     view, currentBook, currentBookId, currentChapter, currentSpineIndex,
     spineCount, tocOpen, settings, settingsOpen,
     activeSidebarTab, highlights, bookmarks, searchOpen, toc,
-    pdfZoom, readingStats, library, pdfDoc, chapterPageInfo
+    pdfZoom, readingStats, library, pdfDoc
   } from '../stores/app.js';
   import {
     saveSettings, saveBookmark, deleteBookmark,
@@ -62,27 +62,9 @@
 
   $: displayTimeText = formatTimeLeft(minutesRemaining);
 
-  let readingPillMode = 0; // 0: pages left in ch, 1: page in ch, 2: time in ch, 3: time in book
-
-  function cycleReadingPill() {
-    readingPillMode = (readingPillMode + 1) % 4;
-  }
-
-  $: displayPillText = (() => {
-    if (readingPillMode === 0) {
-      if ($chapterPageInfo.pagesLeft === 0) return 'End of ch.';
-      return `${$chapterPageInfo.pagesLeft} p. left`;
-    }
-    if (readingPillMode === 1) {
-      return `Page ${$chapterPageInfo.currentPage}/${$chapterPageInfo.totalPages}`;
-    }
-    if (readingPillMode === 2) {
-      return chapterMins ? `~${chapterMins}m in ch.` : `${$chapterPageInfo.pagesLeft} p. left`;
-    }
-    return displayTimeText || `${$chapterPageInfo.pagesLeft} p. left`;
-  })();
-
-  $: tooltipText = `${$chapterPageInfo.pagesLeft === 0 ? 'End of chapter' : `${$chapterPageInfo.pagesLeft} page${$chapterPageInfo.pagesLeft === 1 ? '' : 's'} left in chapter`} (Page ${$chapterPageInfo.currentPage} of ${$chapterPageInfo.totalPages}) • ${displayTimeText} in book (click to cycle)`;
+  $: tooltipText = minutesRemaining !== null
+    ? `${formatTimeLeft(minutesRemaining)} to complete book • ${chapterMins ? `~${chapterMins}m in ${$currentBook?.format === 'pdf' ? 'page' : 'chapter'}` : ''} (at 220 WPM)`.replace(' •  ', ' ')
+    : 'Estimated reading time at 220 WPM';
 
   $: currentBookmark = $bookmarks.find(b => b.spineIndex === $currentSpineIndex);
   $: isBookmarked = !!currentBookmark;
@@ -238,37 +220,24 @@
   </div>
 
   <div class="toolbar-center">
-    <div class="chapter-info-col">
-      <span class="chapter-indicator">
-        {$currentBook?.format === 'pdf' ? `Page ${$currentSpineIndex + 1}` : `Ch. ${$currentSpineIndex + 1}`} / {$spineCount}
-      </span>
-      <span class="chapter-pages-left">
-        {$chapterPageInfo.pagesLeft === 0 ? 'End of chapter' : `${$chapterPageInfo.pagesLeft} p. left`}
-      </span>
-    </div>
-    <div class="progress-bar-container" title="Book progress: {$spineCount > 0 ? Math.round((($currentSpineIndex + 1) / $spineCount) * 100) : 0}%">
+    <span class="chapter-indicator">
+      {$currentBook?.format === 'pdf' ? `Page ${$currentSpineIndex + 1}` : ($currentSpineIndex + 1)} / {$spineCount}
+    </span>
+    <div class="progress-bar-container">
       <div
         class="progress-bar-fill"
         style="width: {$spineCount > 0 ? (($currentSpineIndex + 1) / $spineCount) * 100 : 0}%"
       ></div>
     </div>
-    <button
-      class="reading-pill clickable"
-      on:click={cycleReadingPill}
-      title={tooltipText}
-      type="button"
-    >
-      <svg class="pill-clock-svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        {#if readingPillMode === 0 || readingPillMode === 1}
-          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"></path>
-          <path d="M6 6h10M6 10h10"></path>
-        {:else}
+    {#if displayTimeText}
+      <div class="reading-pill" title={tooltipText}>
+        <svg class="pill-clock-svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"></circle>
           <polyline points="12 6 12 12 16 14"></polyline>
-        {/if}
-      </svg>
-      <span>{displayPillText}</span>
-    </button>
+        </svg>
+        <span>{displayTimeText}</span>
+      </div>
+    {/if}
   </div>
 
   <div class="toolbar-right">
@@ -423,30 +392,13 @@
     margin-left: 4px;
   }
 
-  .chapter-info-col {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    line-height: 1.15;
-    min-width: 55px;
-  }
-
   .chapter-indicator {
     font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--fg-secondary);
-    font-variant-numeric: tabular-nums;
-    text-align: center;
-  }
-
-  .chapter-pages-left {
-    font-size: 0.65rem;
     font-weight: 500;
-    color: var(--accent);
+    color: var(--fg-tertiary);
     font-variant-numeric: tabular-nums;
+    min-width: 45px;
     text-align: center;
-    white-space: nowrap;
-    opacity: 0.9;
   }
 
   .progress-bar-container {
@@ -476,22 +428,6 @@
     font-weight: 500;
     color: var(--fg-secondary);
     letter-spacing: 0.01em;
-  }
-
-  .reading-pill.clickable {
-    cursor: pointer;
-    user-select: none;
-    transition: background var(--duration-fast), border-color var(--duration-fast), transform var(--duration-fast);
-  }
-
-  .reading-pill.clickable:hover {
-    background: var(--bg-hover);
-    border-color: var(--border-hover);
-    color: var(--fg-primary);
-  }
-
-  .reading-pill.clickable:active {
-    transform: scale(0.96);
   }
 
   .pill-clock-svg {
