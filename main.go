@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	_ "embed"
+	"os"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -16,6 +17,17 @@ var assets embed.FS
 //go:embed build/appicon.png
 var appIcon []byte
 
+func init() {
+	// Tune glibc memory allocator to release freed heap pages back to OS aggressively
+	_ = os.Setenv("MALLOC_TRIM_THRESHOLD_", "131072") // 128 KB
+	_ = os.Setenv("MALLOC_ARENA_MAX", "2")
+
+	// Encourage WebKitGTK to trim JavaScriptCore heap & cache on memory pressure
+	if os.Getenv("WEBKIT_MEMORY_PRESSURE_RELIEF_PERCENT") == "" {
+		_ = os.Setenv("WEBKIT_MEMORY_PRESSURE_RELIEF_PERCENT", "50")
+	}
+}
+
 func main() {
 	app := NewApp()
 
@@ -26,13 +38,15 @@ func main() {
 		MinWidth:  800,
 		MinHeight: 600,
 		AssetServer: &assetserver.Options{
-			Assets: assets,
+			Assets:  assets,
+			Handler: app,
 		},
 		OnStartup:  app.startup,
 		OnShutdown: app.shutdown,
 		Linux: &linux.Options{
-			Icon:        appIcon,
-			ProgramName: "read-e",
+			Icon:             appIcon,
+			ProgramName:      "read-e",
+			WebviewGpuPolicy: linux.WebviewGpuPolicyOnDemand,
 		},
 		Bind: []interface{}{
 			app,

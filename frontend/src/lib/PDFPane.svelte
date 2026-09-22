@@ -36,6 +36,7 @@
   let loading = true;
   let error = null;
   let doc = null;
+  let currentLoadingTask = null;
   let numPages = 0;
   let pageDimensions = [];
   let pageTops = [];
@@ -44,11 +45,11 @@
   let renderQueue = [];
   let renderRAFId = null;
   let activeRenders = 0;
-  const MAX_CONCURRENT_RENDERS = 2;
-  const PRE_RENDER_AHEAD = 4;
-  const PRE_RENDER_BEHIND = 2;
-  const EVICT_BEHIND = 4;
-  const EVICT_AHEAD = 6;
+  const MAX_CONCURRENT_RENDERS = 1;
+  const PRE_RENDER_AHEAD = 1;
+  const PRE_RENDER_BEHIND = 0;
+  const EVICT_BEHIND = 2;
+  const EVICT_AHEAD = 3;
   let scrollRAF = null;
   let saveProgressTimer = null;
   let resizeObserver = null;
@@ -159,7 +160,20 @@
       }
 
       cancelAllRenders();
+
+      if (currentLoadingTask) {
+        try { currentLoadingTask.destroy(); } catch (_) {}
+        currentLoadingTask = null;
+      }
+
+      if (doc) {
+        try { doc.destroy(); } catch (_) {}
+        doc = null;
+      }
+
       pdfDoc.set(null);
+      pageDimensions = [];
+      pageTops = [];
     } catch (e) {
       console.error('Error during PDFPane onDestroy cleanup:', e);
     }
@@ -172,16 +186,27 @@
     if (!bookId) return;
 
     try {
-      const data = await getPDFData(bookId);
-      if (!data) throw new Error('No PDF data received from backend');
+      try {
+        currentLoadingTask = pdfjsLib.getDocument({
+          url: `/pdf/${encodeURIComponent(bookId)}`,
+          cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+          cMapPacked: true,
+        });
+        doc = await currentLoadingTask.promise;
+      } catch (streamErr) {
+        console.warn('Streaming PDF failed, falling back to IPC buffer:', streamErr);
+        let data = await getPDFData(bookId);
+        if (!data) throw new Error('No PDF data received from backend');
 
-      const loadingTask = pdfjsLib.getDocument({
-        data,
-        cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
-        cMapPacked: true,
-      });
-
-      doc = await loadingTask.promise;
+        currentLoadingTask = pdfjsLib.getDocument({
+          data,
+          cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+          cMapPacked: true,
+        });
+        data = null;
+        doc = await currentLoadingTask.promise;
+      }
+      currentLoadingTask = null;
       pdfDoc.set(doc);
       numPages = doc.numPages;
       spineCount.set(numPages);
@@ -196,12 +221,19 @@
         }));
       }
 
-      const dims = [];
-      for (let i = 1; i <= numPages; i++) {
-        const page = await doc.getPage(i);
-        const vp = page.getViewport({ scale: 1.0 });
-        dims.push({ width: vp.width, height: vp.height, aspectRatio: vp.height / vp.width });
-        page.cleanup();
+      // Sample page 1 for initial aspect ratio without querying all pages upfront
+      const samplePage = await doc.getPage(1);
+      const sampleVp = samplePage.getViewport({ scale: 1.0 });
+      const defaultDim = {
+        width: sampleVp.width || 612,
+        height: sampleVp.height || 792,
+        aspectRatio: (sampleVp.height || 792) / (sampleVp.width || 612),
+      };
+      samplePage.cleanup();
+
+      const dims = new Array(numPages);
+      for (let i = 0; i < numPages; i++) {
+        dims[i] = defaultDim;
       }
       pageDimensions = dims;
 
@@ -496,6 +528,10 @@
       await renderTask.promise;
 
       if (!renderedPages.has(pageIndex)) {
+        if (canvas) {
+          canvas.width = 0;
+          canvas.height = 0;
+        }
         page.cleanup();
         return;
       }
@@ -546,11 +582,25 @@
           pageData.renderTask.cancel();
         } catch (_) {}
       }
+      if (pageData.canvas) {
+        pageData.canvas.width = 0;
+        pageData.canvas.height = 0;
+      }
+      if (pageData.page) {
+        try {
+          pageData.page.cleanup();
+        } catch (_) {}
+      }
       renderedPages.delete(pageIndex);
     }
 
     const pageContainer = document.getElementById(`page-${pageIndex + 1}`);
     if (pageContainer) {
+      const cvs = pageContainer.querySelector('canvas');
+      if (cvs) {
+        cvs.width = 0;
+        cvs.height = 0;
+      }
       const dims = pageDimensions[pageIndex];
       const scale = getScaleForPage(pageIndex);
       const ph = dims ? Math.floor(dims.height * scale) : 792;
@@ -574,8 +624,22 @@
           data.renderTask.cancel();
         } catch (_) {}
       }
+      if (data.canvas) {
+        data.canvas.width = 0;
+        data.canvas.height = 0;
+      }
+      if (data.page) {
+        try {
+          data.page.cleanup();
+        } catch (_) {}
+      }
       const el = document.getElementById(`page-${pageIndex + 1}`);
       if (el) {
+        const cvs = el.querySelector('canvas');
+        if (cvs) {
+          cvs.width = 0;
+          cvs.height = 0;
+        }
         const dims = pageDimensions[pageIndex];
         const scale = getScaleForPage(pageIndex);
         const ph = dims ? Math.floor(dims.height * scale) : 792;

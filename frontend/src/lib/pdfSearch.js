@@ -1,6 +1,6 @@
 // PDF full-text search helper
 
-const pageTextCache = new Map(); // pdfDoc -> Promise<string[]>
+const pageTextCache = new WeakMap(); // pdfDoc -> Promise<string[]>
 
 export async function getDocumentPageTexts(doc) {
   if (pageTextCache.has(doc)) {
@@ -11,13 +11,18 @@ export async function getDocumentPageTexts(doc) {
     const texts = [];
     const numPages = doc.numPages;
     for (let i = 1; i <= numPages; i++) {
+      let page = null;
       try {
-        const page = await doc.getPage(i);
+        page = await doc.getPage(i);
         const textContent = await page.getTextContent();
         const str = textContent.items.map((item) => item.str).join(' ');
         texts.push(str);
       } catch (e) {
         texts.push('');
+      } finally {
+        if (page) {
+          try { page.cleanup(); } catch (_) {}
+        }
       }
     }
     return texts;
@@ -25,6 +30,12 @@ export async function getDocumentPageTexts(doc) {
 
   pageTextCache.set(doc, promise);
   return promise;
+}
+
+export function clearSearchCache(doc) {
+  if (doc && pageTextCache.has(doc)) {
+    pageTextCache.delete(doc);
+  }
 }
 
 export async function searchPDF(doc, query) {

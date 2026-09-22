@@ -1,13 +1,13 @@
 <script>
   import {
-    view, currentBook, currentBookId, currentSpineIndex,
+    view, currentBook, currentBookId, currentChapter, currentSpineIndex,
     spineCount, tocOpen, settings, settingsOpen,
     activeSidebarTab, highlights, bookmarks, searchOpen, toc,
-    pdfZoom, readingStats, library
+    pdfZoom, readingStats, library, pdfDoc
   } from '../stores/app.js';
   import {
     saveSettings, saveBookmark, deleteBookmark,
-    getChapterWordCount, getReadingStats, getLibrary
+    getChapterWordCount, getReadingStats, getLibrary, releaseMemory
   } from './api.js';
 
   let bookStats = null;
@@ -105,6 +105,10 @@
     view.set('library');
     currentBook.set(null);
     currentBookId.set(null);
+    currentChapter.set('');
+    pdfDoc.set(null);
+    toc.set([]);
+    releaseMemory();
     try {
       const books = await getLibrary();
       if (books && Array.isArray(books) && books.length > 0) {

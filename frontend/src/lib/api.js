@@ -203,3 +203,9 @@ export async function getPDFData(bookID) {
   return res;
 }
 
+export async function releaseMemory() {
+  const go = getGoBinding();
+  if (!go || !go.ReleaseMemory) return;
+  return go.ReleaseMemory();
+}
+

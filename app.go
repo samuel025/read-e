@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
+	"strings"
 	"sync"
 
 	"epub-reader/internal/epub"
@@ -349,4 +352,45 @@ func (a *App) getReader(bookID string) (*epub.Reader, error) {
 
 	a.openBooks[bookID] = r
 	return r, nil
+}
+
+// ServeHTTP enables streaming PDFs directly over HTTP range requests via Wails AssetServer
+func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/pdf/") {
+		bookID := strings.TrimPrefix(r.URL.Path, "/pdf/")
+		meta, err := a.store.GetBook(bookID)
+		filePath := ""
+		if err == nil && meta.FilePath != "" {
+			filePath = meta.FilePath
+		} else {
+			a.mu.Lock()
+			p, ok := a.bookPaths[bookID]
+			a.mu.Unlock()
+			if ok {
+				filePath = p
+			}
+		}
+
+		if filePath != "" {
+			if _, statErr := os.Stat(filePath); statErr == nil {
+				w.Header().Set("Content-Type", "application/pdf")
+				w.Header().Set("Accept-Ranges", "bytes")
+				http.ServeFile(w, r, filePath)
+				return
+			}
+		}
+	}
+	http.NotFound(w, r)
+}
+
+// ReleaseMemory closes open readers and triggers aggressive GC and OS heap trimming
+func (a *App) ReleaseMemory() {
+	a.mu.Lock()
+	for id, r := range a.openBooks {
+		r.Close()
+		delete(a.openBooks, id)
+	}
+	a.mu.Unlock()
+
+	debug.FreeOSMemory()
 }

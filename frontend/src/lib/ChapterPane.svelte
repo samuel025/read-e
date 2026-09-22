@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import {
     currentChapter, currentBookId, currentSpineIndex,
     spineCount, settings, highlights, bookmarks, searchOpen
@@ -1475,15 +1475,35 @@
       }, '*');
     }
 
-    const interval = setInterval(() => {
-      if (iframeEl?.contentWindow) {
+    if (saveProgressTimer) {
+      clearInterval(saveProgressTimer);
+    }
+    saveProgressTimer = setInterval(() => {
+      if (iframeEl?.contentWindow && $currentBookId) {
         const scrollY = iframeEl.contentWindow.scrollY || 0;
         saveProgress($currentBookId, $currentSpineIndex, scrollY);
       }
     }, 5000);
 
-    iframeEl.addEventListener('load', () => clearInterval(interval), { once: true });
+    iframeEl.addEventListener('load', () => {
+      if (saveProgressTimer) clearInterval(saveProgressTimer);
+    }, { once: true });
   }
+
+  let saveProgressTimer = null;
+
+  onDestroy(() => {
+    if (saveProgressTimer) {
+      clearInterval(saveProgressTimer);
+      saveProgressTimer = null;
+    }
+    if (iframeEl) {
+      try {
+        iframeEl.srcdoc = '';
+        iframeEl.src = 'about:blank';
+      } catch (_) {}
+    }
+  });
 </script>
 
 <div class="chapter-pane">

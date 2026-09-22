@@ -31,34 +31,46 @@
   }
 
   async function generatePDFCover(book, alreadyHasCover = false) {
+    let doc = null;
+    let page = null;
+    let canvas = null;
+    let loadingTask = null;
     try {
       const pdfjsLib = await import('pdfjs-dist');
       const pdfjsWorker = (await import('pdfjs-dist/build/pdf.worker.min.js?url')).default;
       pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
 
-      const data = await getPDFData(book.id);
-      if (!data) return;
+      try {
+        loadingTask = pdfjsLib.getDocument({
+          url: `/pdf/${encodeURIComponent(book.id)}`,
+          cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+          cMapPacked: true,
+        });
+        doc = await loadingTask.promise;
+      } catch (streamErr) {
+        const data = await getPDFData(book.id);
+        if (!data) return;
 
-      const loadingTask = pdfjsLib.getDocument({
-        data,
-        cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
-        cMapPacked: true,
-      });
-
-      const doc = await loadingTask.promise;
+        loadingTask = pdfjsLib.getDocument({
+          data,
+          cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+          cMapPacked: true,
+        });
+        doc = await loadingTask.promise;
+      }
       if (doc.numPages > 0) {
         await updateBookTotalCount(book.id, doc.numPages);
       }
 
       let base64 = book.coverBase64 || book.cover_base64 || '';
       if (!alreadyHasCover) {
-        const page = await doc.getPage(1);
+        page = await doc.getPage(1);
 
         const viewport = page.getViewport({ scale: 1.0 });
         const scale = 400 / viewport.width;
         const scaledViewport = page.getViewport({ scale });
 
-        const canvas = document.createElement('canvas');
+        canvas = document.createElement('canvas');
         canvas.width = scaledViewport.width;
         canvas.height = scaledViewport.height;
         const ctx = canvas.getContext('2d');
@@ -85,11 +97,22 @@
           return l;
         });
       });
-
-      doc.destroy();
     } catch (e) {
       console.error('Failed to process PDF cover / count for', book.title, e);
     } finally {
+      if (page) {
+        try { page.cleanup(); } catch (_) {}
+      }
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+      if (doc) {
+        try { doc.destroy(); } catch (_) {}
+      }
+      if (loadingTask) {
+        try { loadingTask.destroy(); } catch (_) {}
+      }
       generatingCovers.delete(book.id);
     }
   }
