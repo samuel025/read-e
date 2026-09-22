@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -356,8 +357,20 @@ func (a *App) getReader(bookID string) (*epub.Reader, error) {
 
 // ServeHTTP enables streaming PDFs directly over HTTP range requests via Wails AssetServer
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "*")
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	if strings.HasPrefix(r.URL.Path, "/pdf/") {
-		bookID := strings.TrimPrefix(r.URL.Path, "/pdf/")
+		rawID := strings.TrimPrefix(r.URL.Path, "/pdf/")
+		bookID, unescapeErr := url.PathUnescape(rawID)
+		if unescapeErr != nil {
+			bookID = rawID
+		}
 		meta, err := a.store.GetBook(bookID)
 		filePath := ""
 		if err == nil && meta.FilePath != "" {

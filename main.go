@@ -26,6 +26,9 @@ func init() {
 	if os.Getenv("WEBKIT_MEMORY_PRESSURE_RELIEF_PERCENT") == "" {
 		_ = os.Setenv("WEBKIT_MEMORY_PRESSURE_RELIEF_PERCENT", "50")
 	}
+
+	// Disable compositing mode to avoid heavy GPU/Mesa driver allocations
+	_ = os.Setenv("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
 }
 
 func main() {
@@ -46,7 +49,7 @@ func main() {
 		Linux: &linux.Options{
 			Icon:             appIcon,
 			ProgramName:      "read-e",
-			WebviewGpuPolicy: linux.WebviewGpuPolicyOnDemand,
+			WebviewGpuPolicy: linux.WebviewGpuPolicyNever,
 		},
 		Bind: []interface{}{
 			app,

@@ -6,6 +6,8 @@
 
   let searchQuery = '';
   const generatingCovers = new Set();
+  const coverQueue = [];
+  let isProcessingCoverQueue = false;
   let showInsights = false;
 
   $: filteredBooks = (Array.isArray($library) ? $library : []).filter((b) => {
@@ -24,10 +26,25 @@
         const hasTotal = (b.totalCount || 0) > 0;
         if (b.format === 'pdf' && (!hasCover || !hasTotal) && !generatingCovers.has(b.id)) {
           generatingCovers.add(b.id);
-          generatePDFCover(b, hasCover);
+          coverQueue.push({ book: b, hasCover });
         }
       }
+      processCoverQueue();
     }
+  }
+
+  async function processCoverQueue() {
+    if (isProcessingCoverQueue) return;
+    isProcessingCoverQueue = true;
+    while (coverQueue.length > 0) {
+      const item = coverQueue.shift();
+      try {
+        await generatePDFCover(item.book, item.hasCover);
+      } catch (e) {
+        console.error('Error generating cover for', item.book?.title, e);
+      }
+    }
+    isProcessingCoverQueue = false;
   }
 
   async function generatePDFCover(book, alreadyHasCover = false) {
