@@ -131,18 +131,50 @@ sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev build-essential
 
 The compiled binary will be placed in `build/bin/read-e`.
 
-### Debian / Ubuntu Packaging (.deb)
+### Packaging & Distribution
 
-Build and bundle **read e** into a `.deb` package with desktop integration, MIME-type associations, and high-resolution icons:
+#### 1. Universal Linux AppImage (.AppImage)
+
+Generates a standalone, portable single-file executable that runs across **all Linux distributions** (Ubuntu, Debian, Fedora, Arch Linux, openSUSE, Linux Mint, etc.) without requiring installation or root permissions:
 
 ```bash
-# Build binary and generate .deb package in dist/
-make package
+# Generate .AppImage in dist/
+make package-appimage
+
+# Or directly
+python3 scripts/package-appimage.py
+```
+
+Run the resulting AppImage:
+```bash
+chmod +x ./dist/read-e_1.0.0_x86_64.AppImage
+./dist/read-e_1.0.0_x86_64.AppImage
+```
+
+#### 2. Debian / Ubuntu Package (.deb)
+
+Build and bundle **read e** into a standard `.deb` package with desktop integration, MIME-type associations, and high-resolution icons:
+
+```bash
+# Generate .deb package in dist/
+make package-deb
+
+# Or directly
+python3 scripts/package-deb.py
 ```
 
 Install the resulting `.deb` package:
 ```bash
 sudo apt install ./dist/read-e_1.0.0_amd64.deb
+# or
+sudo dpkg -i ./dist/read-e_1.0.0_amd64.deb
+```
+
+#### 3. Build All Packages
+
+To build both `.deb` and `.AppImage` in one step:
+```bash
+make package
 ```
 
 ---
