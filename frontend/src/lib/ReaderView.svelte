@@ -3,6 +3,7 @@
   import TOCSidebar from './TOCSidebar.svelte';
   import ChapterPane from './ChapterPane.svelte';
   import PDFPane from './PDFPane.svelte';
+  import ReaderFooter from './ReaderFooter.svelte';
   import { tocOpen, currentBook, currentBookId, highlights, bookmarks, currentSpineIndex, spineCount, library } from '../stores/app.js';
   import { getHighlights, getBookmarks } from './api.js';
 
@@ -92,6 +93,7 @@
       <ChapterPane />
     {/if}
   </div>
+  <ReaderFooter />
 </div>
 
 <style>

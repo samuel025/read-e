@@ -11,6 +11,7 @@
     toc,
     spineCount,
     readingStats,
+    chapterPageInfo,
     highlights,
     settings,
     pdfDoc,
@@ -338,6 +339,73 @@
     }
   }
 
+  function getTOCChapters() {
+    const list = [];
+    function traverse(items) {
+      if (!items) return;
+      for (const item of items) {
+        if (typeof item.spineIndex === 'number') {
+          list.push({ title: item.title, pageIndex: item.spineIndex });
+        }
+        if (item.children?.length) {
+          traverse(item.children);
+        }
+      }
+    }
+    traverse($toc);
+    list.sort((a, b) => a.pageIndex - b.pageIndex);
+    return list;
+  }
+
+  function updateChapterPageInfo(pageIdx) {
+    const totalDocPages = numPages || $spineCount || 1;
+    const chapters = getTOCChapters();
+
+    let currentChTitle = '';
+    let chStartPage = 0;
+    let chEndPage = totalDocPages;
+
+    if (chapters.length > 0) {
+      for (let i = 0; i < chapters.length; i++) {
+        if (chapters[i].pageIndex <= pageIdx) {
+          currentChTitle = chapters[i].title;
+          chStartPage = chapters[i].pageIndex;
+          if (i + 1 < chapters.length) {
+            chEndPage = chapters[i + 1].pageIndex;
+          } else {
+            chEndPage = totalDocPages;
+          }
+        } else {
+          break;
+        }
+      }
+      if (!currentChTitle && chapters[0].pageIndex > pageIdx) {
+        currentChTitle = 'Front Matter';
+        chStartPage = 0;
+        chEndPage = chapters[0].pageIndex;
+      }
+    }
+
+    if (!currentChTitle) {
+      currentChTitle = `Page ${pageIdx + 1}`;
+      chStartPage = 0;
+      chEndPage = totalDocPages;
+    }
+
+    const chapterTotalPages = Math.max(1, chEndPage - chStartPage);
+    const currentPageInChapter = Math.min(chapterTotalPages, Math.max(1, pageIdx - chStartPage + 1));
+    const pagesLeft = Math.max(0, chEndPage - pageIdx - 1);
+    const percentInChapter = Math.min(100, Math.max(0, Math.round((currentPageInChapter / chapterTotalPages) * 100)));
+
+    chapterPageInfo.set({
+      currentPage: currentPageInChapter,
+      totalPages: chapterTotalPages,
+      pagesLeft: pagesLeft,
+      chapterTitle: currentChTitle,
+      percentInChapter: percentInChapter,
+    });
+  }
+
   function updateMinutesRemaining(activePageIndex) {
     const totalPages = numPages || $spineCount || 1;
     const pageIdx = typeof activePageIndex === 'number' ? activePageIndex : ($currentSpineIndex || 0);
@@ -353,6 +421,8 @@
       minutesLeft: bookMinutesLeft,
       chapterMinutes: chapterMinutes,
     });
+
+    updateChapterPageInfo(pageIdx);
   }
 
   async function restoreSavedPosition(bookId) {

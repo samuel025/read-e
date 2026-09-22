@@ -12,6 +12,13 @@ export const currentSpineIndex = writable(0);
 export const toc = writable([]);
 export const spineCount = writable(0);
 export const readingStats = writable({ words: 0, minutesLeft: 0 });
+export const chapterPageInfo = writable({
+  currentPage: 1,
+  totalPages: 1,
+  pagesLeft: 0,
+  chapterTitle: '',
+  percentInChapter: 0,
+});
 export const pdfDoc = writable(null);
 export const pdfZoom = writable(100); // percentage: 100, 125, or -1 for fit-width
 

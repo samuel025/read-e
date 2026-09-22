@@ -2,7 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import {
     currentChapter, currentBookId, currentSpineIndex,
-    spineCount, settings, highlights, bookmarks, searchOpen
+    spineCount, settings, highlights, bookmarks, searchOpen,
+    toc, chapterPageInfo
   } from '../stores/app.js';
   import {
     getChapter, saveProgress, getProgress,
@@ -1510,6 +1511,70 @@
 
   let saveProgressTimer = null;
   let scrollDebounceTimer = null;
+  let iframeResizeObserver = null;
+  let pageCalcRAF = null;
+
+  function getChapterTitle(spineIndex) {
+    function findTitle(entries) {
+      if (!entries) return null;
+      for (const e of entries) {
+        if (e.spineIndex === spineIndex) return e.title;
+        if (e.children && e.children.length > 0) {
+          const t = findTitle(e.children);
+          if (t) return t;
+        }
+      }
+      return null;
+    }
+    return findTitle($toc) || `Chapter ${spineIndex + 1}`;
+  }
+
+  function updateChapterPages() {
+    if (!iframeEl?.contentWindow) return;
+    const win = iframeEl.contentWindow;
+    const doc = win.document;
+    if (!doc || !doc.documentElement) return;
+
+    const clientHeight = iframeEl.clientHeight || win.innerHeight || 800;
+    const scrollHeight = Math.max(
+      doc.documentElement.scrollHeight || 0,
+      doc.body ? doc.body.scrollHeight : 0
+    );
+    const scrollTop = win.scrollY || doc.documentElement.scrollTop || 0;
+
+    // Viewport height defines one screen page
+    const totalPages = Math.max(1, Math.ceil(scrollHeight / clientHeight));
+    
+    // Check if user is scrolled to the very bottom
+    const isAtBottom = (scrollTop + clientHeight) >= (scrollHeight - 15);
+    const currentPage = isAtBottom ? totalPages : Math.min(totalPages, Math.max(1, Math.floor(scrollTop / clientHeight) + 1));
+    const pagesLeft = isAtBottom ? 0 : Math.max(0, totalPages - currentPage);
+
+    const maxScroll = Math.max(1, scrollHeight - clientHeight);
+    const percentInChapter = Math.min(100, Math.max(0, Math.round((scrollTop / maxScroll) * 100)));
+
+    const title = getChapterTitle($currentSpineIndex);
+
+    chapterPageInfo.set({
+      currentPage,
+      totalPages,
+      pagesLeft,
+      chapterTitle: title,
+      percentInChapter: isAtBottom ? 100 : percentInChapter,
+    });
+  }
+
+  function queuePageCalculation() {
+    if (pageCalcRAF) cancelAnimationFrame(pageCalcRAF);
+    pageCalcRAF = requestAnimationFrame(() => {
+      updateChapterPages();
+    });
+  }
+
+  // Recalculate if settings change
+  $: if ($settings && iframeEl) {
+    setTimeout(queuePageCalculation, 60);
+  }
 
   function flushProgress() {
     if ($currentBookId && iframeEl?.contentWindow) {
@@ -1526,11 +1591,13 @@
       pendingHash = null;
       setTimeout(() => {
         iframeEl?.contentWindow?.postMessage({ type: 'scroll-to-hash', hash: h }, '*');
+        setTimeout(queuePageCalculation, 150);
       }, 100);
     } else {
       getProgress($currentBookId).then((pos) => {
         if (pos && pos.spineIndex === $currentSpineIndex && pos.scrollOffset && iframeEl?.contentWindow) {
           iframeEl.contentWindow.scrollTo(0, pos.scrollOffset);
+          setTimeout(queuePageCalculation, 100);
         }
       });
     }
@@ -1543,14 +1610,35 @@
       }, '*');
     }
 
+    if (iframeResizeObserver) {
+      iframeResizeObserver.disconnect();
+      iframeResizeObserver = null;
+    }
+
     try {
       iframeEl.contentWindow.addEventListener('scroll', () => {
+        queuePageCalculation();
         if (scrollDebounceTimer) clearTimeout(scrollDebounceTimer);
         scrollDebounceTimer = setTimeout(() => {
           flushProgress();
         }, 500);
       }, { passive: true });
+
+      iframeEl.contentWindow.addEventListener('resize', () => {
+        queuePageCalculation();
+      }, { passive: true });
+
+      if (window.ResizeObserver && iframeEl.contentDocument?.body) {
+        iframeResizeObserver = new ResizeObserver(() => {
+          queuePageCalculation();
+        });
+        iframeResizeObserver.observe(iframeEl.contentDocument.body);
+      }
     } catch (_) {}
+
+    queuePageCalculation();
+    setTimeout(queuePageCalculation, 150);
+    setTimeout(queuePageCalculation, 450);
 
     if (saveProgressTimer) {
       clearInterval(saveProgressTimer);
@@ -1568,6 +1656,14 @@
     if (scrollDebounceTimer) {
       clearTimeout(scrollDebounceTimer);
       scrollDebounceTimer = null;
+    }
+    if (iframeResizeObserver) {
+      iframeResizeObserver.disconnect();
+      iframeResizeObserver = null;
+    }
+    if (pageCalcRAF) {
+      cancelAnimationFrame(pageCalcRAF);
+      pageCalcRAF = null;
     }
     flushProgress();
 
