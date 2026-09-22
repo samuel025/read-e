@@ -177,6 +177,12 @@ export async function getChapterWordCount(bookID, spineIndex) {
   return go.GetChapterWordCount(bookID, spineIndex);
 }
 
+export async function getReadingStats(bookID, spineIndex) {
+  const go = getGoBinding();
+  if (!go) return null;
+  return go.GetReadingStats(bookID, spineIndex);
+}
+
 export async function getPDFData(bookID) {
   const go = getGoBinding();
   if (!go) return null;

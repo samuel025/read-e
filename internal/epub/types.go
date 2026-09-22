@@ -11,6 +11,14 @@ type BookInfo struct {
 	Format      string `json:"format"`
 }
 
+type BookReadingStats struct {
+	TotalWords      int `json:"totalWords"`
+	RemainingWords  int `json:"remainingWords"`
+	ChapterWords    int `json:"chapterWords"`
+	BookMinutesLeft int `json:"bookMinutesLeft"`
+	ChapterMinutes  int `json:"chapterMinutes"`
+}
+
 type TOCEntry struct {
 	Title      string     `json:"title"`
 	Href       string     `json:"href"`

@@ -9,15 +9,18 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 )
 
 type Reader struct {
-	zip      *zip.ReadCloser
-	opfDir   string
-	manifest map[string]ManifestItem
-	spine    []SpineItem
-	meta     BookInfo
-	toc      []TOCEntry
+	zip          *zip.ReadCloser
+	opfDir       string
+	manifest     map[string]ManifestItem
+	spine        []SpineItem
+	meta         BookInfo
+	toc          []TOCEntry
+	chapterWords []int
+	wordMu       sync.Mutex
 }
 
 type containerXML struct {
@@ -579,17 +582,47 @@ func extractTextContent(s string) string {
 	return strings.TrimSpace(s[:end])
 }
 
+func (r *Reader) ensureWordCounts() {
+	r.wordMu.Lock()
+	defer r.wordMu.Unlock()
+	if len(r.chapterWords) == len(r.spine) {
+		return
+	}
+	r.chapterWords = make([]int, len(r.spine))
+	for i, item := range r.spine {
+		fullPath := r.resolvePath(item.Href)
+		data, err := r.readFile(fullPath)
+		if err != nil {
+			continue
+		}
+		plainText := stripHTML(string(data))
+		r.chapterWords[i] = len(strings.Fields(plainText))
+	}
+}
+
 func (r *Reader) ChapterWordCount(spineIndex int) int {
 	if spineIndex < 0 || spineIndex >= len(r.spine) {
 		return 0
 	}
-	fullPath := r.resolvePath(r.spine[spineIndex].Href)
-	data, err := r.readFile(fullPath)
-	if err != nil {
-		return 0
+	r.ensureWordCounts()
+	return r.chapterWords[spineIndex]
+}
+
+func (r *Reader) ReadingStats(spineIndex int) (totalWords int, remainingWords int, chapterWords int) {
+	r.ensureWordCounts()
+	if spineIndex < 0 {
+		spineIndex = 0
 	}
-	plainText := stripHTML(string(data))
-	return len(strings.Fields(plainText))
+	for i, w := range r.chapterWords {
+		totalWords += w
+		if i >= spineIndex {
+			remainingWords += w
+		}
+	}
+	if spineIndex < len(r.chapterWords) {
+		chapterWords = r.chapterWords[spineIndex]
+	}
+	return totalWords, remainingWords, chapterWords
 }
 
 func (r *Reader) Search(query string) []SearchResult {

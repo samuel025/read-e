@@ -39,14 +39,16 @@
   let numPages = 0;
   let pageDimensions = [];
   let pageTops = [];
-  let pageWordCounts = [];
 
   let renderedPages = new Map();
   let renderQueue = [];
-  let renderTimeoutId = null;
-  let currentlyRendering = false;
-  let isScrolling = false;
-  let scrollEndTimer = null;
+  let renderRAFId = null;
+  let activeRenders = 0;
+  const MAX_CONCURRENT_RENDERS = 2;
+  const PRE_RENDER_AHEAD = 4;
+  const PRE_RENDER_BEHIND = 2;
+  const EVICT_BEHIND = 4;
+  const EVICT_AHEAD = 6;
   let scrollRAF = null;
   let saveProgressTimer = null;
   let resizeObserver = null;
@@ -147,18 +149,20 @@
     window.removeEventListener('mouseup', handleMouseUp);
     window.removeEventListener('mousedown', handleMouseDown);
 
-    if (scrollRAF) cancelAnimationFrame(scrollRAF);
-    if (saveProgressTimer) clearTimeout(saveProgressTimer);
-    if (scrollEndTimer) clearTimeout(scrollEndTimer);
-    if (renderTimeoutId) clearTimeout(renderTimeoutId);
+    try {
+      if (scrollRAF) cancelAnimationFrame(scrollRAF);
+      if (saveProgressTimer) clearTimeout(saveProgressTimer);
 
-    if (resizeObserver) {
-      resizeObserver.disconnect();
-      resizeObserver = null;
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+        resizeObserver = null;
+      }
+
+      cancelAllRenders();
+      pdfDoc.set(null);
+    } catch (e) {
+      console.error('Error during PDFPane onDestroy cleanup:', e);
     }
-
-    cancelAllRenders();
-    pdfDoc.set(null);
   });
 
   async function loadPDFDocument() {
@@ -257,33 +261,53 @@
     return result;
   }
 
+  let avgWordsPerPage = 250;
+
   async function calculateReadingStats(pdf) {
     try {
-      const pageTexts = await getDocumentPageTexts(pdf);
-      const counts = [];
-      let totalWords = 0;
-      for (const text of pageTexts) {
-        if (!text) { counts.push(0); continue; }
-        const wCount = text.trim().split(/\s+/).filter(Boolean).length;
-        counts.push(wCount);
-        totalWords += wCount;
+      const sampleCount = Math.min(pdf.numPages, 10);
+      let sampleWords = 0;
+      let countedPages = 0;
+      for (let i = 1; i <= sampleCount; i++) {
+        try {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          const str = textContent.items.map(it => it.str).join(' ');
+          const w = str.trim().split(/\s+/).filter(Boolean).length;
+          if (w > 20) {
+            sampleWords += w;
+            countedPages++;
+          }
+          page.cleanup();
+        } catch (_) {}
       }
-      pageWordCounts = counts;
-      updateMinutesRemaining($currentSpineIndex, totalWords);
-    } catch (_) {}
+      if (countedPages > 0) {
+        avgWordsPerPage = Math.max(100, Math.round(sampleWords / countedPages));
+      } else {
+        avgWordsPerPage = 250;
+      }
+      updateMinutesRemaining($currentSpineIndex);
+    } catch (_) {
+      avgWordsPerPage = 250;
+      updateMinutesRemaining($currentSpineIndex);
+    }
   }
 
-  function updateMinutesRemaining(activePageIndex, totalWordsFallback) {
-    if (!pageWordCounts.length) {
-      if (totalWordsFallback) {
-        readingStats.set({ words: totalWordsFallback, minutesLeft: Math.max(1, Math.round(totalWordsFallback / 220)) });
-      }
-      return;
-    }
-    let wordsLeft = 0;
-    for (let i = activePageIndex; i < pageWordCounts.length; i++) wordsLeft += pageWordCounts[i] || 0;
-    const totalWords = pageWordCounts.reduce((a, b) => a + b, 0);
-    readingStats.set({ words: totalWords, minutesLeft: Math.max(1, Math.round(wordsLeft / 220)) });
+  function updateMinutesRemaining(activePageIndex) {
+    const totalPages = numPages || $spineCount || 1;
+    const pageIdx = typeof activePageIndex === 'number' ? activePageIndex : ($currentSpineIndex || 0);
+    const pagesLeft = Math.max(0, totalPages - 1 - pageIdx);
+    const wordsLeft = pagesLeft * avgWordsPerPage;
+    const totalWords = totalPages * avgWordsPerPage;
+    const bookMinutesLeft = Math.round(wordsLeft / 220);
+    const chapterMinutes = Math.max(1, Math.round(avgWordsPerPage / 220));
+
+    readingStats.set({
+      words: totalWords,
+      remainingWords: wordsLeft,
+      minutesLeft: bookMinutesLeft,
+      chapterMinutes: chapterMinutes,
+    });
   }
 
   async function restoreSavedPosition(bookId) {
@@ -320,22 +344,8 @@
   }
 
   function handleScroll() {
-    isScrolling = true;
     if (selectionToolbar.visible) selectionToolbar.visible = false;
     if (activeNotePopover) activeNotePopover = null;
-
-    if (renderTimeoutId !== null) {
-      clearTimeout(renderTimeoutId);
-      renderTimeoutId = null;
-    }
-
-    clearTimeout(scrollEndTimer);
-    scrollEndTimer = setTimeout(() => {
-      isScrolling = false;
-      const activeIdx = getActivePageIndex();
-      queueVisiblePages(activeIdx);
-      scheduleRender();
-    }, 150);
 
     if (scrollRAF) return;
     scrollRAF = requestAnimationFrame(() => {
@@ -347,6 +357,9 @@
         currentSpineIndex.set(activeIndex);
         updateMinutesRemaining(activeIndex);
       }
+
+      queueVisiblePages(activeIndex);
+      scheduleRender();
 
       clearTimeout(saveProgressTimer);
       saveProgressTimer = setTimeout(() => {
@@ -382,45 +395,66 @@
   }
 
   function queueVisiblePages(activeIdx) {
-    const needed = [activeIdx];
-    if (activeIdx + 1 < numPages) needed.push(activeIdx + 1);
-    if (activeIdx - 1 >= 0) needed.push(activeIdx - 1);
-
+    // 1. Evict pages far outside the viewport to prevent memory growth
     for (const [pIdx] of renderedPages) {
-      if (Math.abs(pIdx - activeIdx) > 1) {
+      if (pIdx < activeIdx - EVICT_BEHIND || pIdx > activeIdx + EVICT_AHEAD) {
         unrenderPage(pIdx);
       }
     }
 
+    // 2. Determine needed window: from (activeIdx - 2) to (activeIdx + 4)
+    const needed = [];
+    needed.push(activeIdx);
+    if (activeIdx + 1 < numPages) needed.push(activeIdx + 1);
+
+    // Pre-render ahead (user usually scrolls forward)
+    for (let i = activeIdx + 2; i <= activeIdx + PRE_RENDER_AHEAD && i < numPages; i++) {
+      needed.push(i);
+    }
+
+    // Pre-render behind
+    for (let i = activeIdx - 1; i >= activeIdx - PRE_RENDER_BEHIND && i >= 0; i--) {
+      needed.push(i);
+    }
+
+    // 3. Queue pages that are not yet rendered or in queue
     for (const idx of needed) {
       if (!renderedPages.has(idx) && !renderQueue.includes(idx)) {
         renderQueue.push(idx);
       }
     }
+
+    renderQueue = renderQueue.filter(idx => (idx >= activeIdx - EVICT_BEHIND && idx <= activeIdx + EVICT_AHEAD) && !renderedPages.has(idx));
   }
 
   function scheduleRender() {
-    if (renderTimeoutId !== null) return;
-    renderTimeoutId = setTimeout(processRenderQueue, 30);
+    if (renderRAFId !== null) return;
+    renderRAFId = requestAnimationFrame(processRenderQueue);
   }
 
   async function processRenderQueue() {
-    renderTimeoutId = null;
-    if (isScrolling || currentlyRendering || !doc || !viewportEl) return;
+    renderRAFId = null;
+    if (!doc || !viewportEl || !renderQueue.length) return;
 
     const activeIdx = getActivePageIndex();
-    renderQueue = renderQueue.filter((idx) => Math.abs(idx - activeIdx) <= 1 && !renderedPages.has(idx));
-    if (!renderQueue.length) return;
+    // Prioritize active page first, then next page, then nearest
+    renderQueue.sort((a, b) => {
+      if (a === activeIdx) return -1;
+      if (b === activeIdx) return 1;
+      if (a === activeIdx + 1) return -1;
+      if (b === activeIdx + 1) return 1;
+      return Math.abs(a - activeIdx) - Math.abs(b - activeIdx);
+    });
 
-    renderQueue.sort((a, b) => Math.abs(a - activeIdx) - Math.abs(b - activeIdx));
-    const pageIndex = renderQueue.shift();
+    while (activeRenders < MAX_CONCURRENT_RENDERS && renderQueue.length > 0) {
+      const pageIndex = renderQueue.shift();
+      if (renderedPages.has(pageIndex)) continue;
 
-    currentlyRendering = true;
-    await renderPage(pageIndex);
-    currentlyRendering = false;
-
-    if (!isScrolling && renderQueue.length > 0) {
-      renderTimeoutId = setTimeout(processRenderQueue, 60);
+      activeRenders++;
+      renderPage(pageIndex).finally(() => {
+        activeRenders--;
+        scheduleRender();
+      });
     }
   }
 
@@ -466,34 +500,35 @@
         return;
       }
 
+      // Immediately display canvas, removing placeholder
       pageContainer.innerHTML = '';
       pageContainer.appendChild(canvas);
 
-      const textLayerDiv = document.createElement('div');
-      textLayerDiv.className = 'textLayer';
-      textLayerDiv.style.width = `${pw}px`;
-      textLayerDiv.style.height = `${ph}px`;
-      textLayerDiv.style.setProperty('--scale-factor', viewport.scale);
-      pageContainer.appendChild(textLayerDiv);
+      // Mount text layer and highlights in background without blocking next page canvas render
+      (async () => {
+        try {
+          const textLayerDiv = document.createElement('div');
+          textLayerDiv.className = 'textLayer';
+          textLayerDiv.style.width = `${pw}px`;
+          textLayerDiv.style.height = `${ph}px`;
+          textLayerDiv.style.setProperty('--scale-factor', viewport.scale);
+          pageContainer.appendChild(textLayerDiv);
 
-      renderedPages.set(pageIndex, { page, renderTask, canvas, textLayer: textLayerDiv, scale });
-
-      try {
-        const textContent = await page.getTextContent();
-        if (renderedPages.has(pageIndex)) {
-          const textLayerTask = pdfjsLib.renderTextLayer({
-            textContentSource: textContent,
-            container: textLayerDiv,
-            viewport,
-          });
-          await textLayerTask.promise;
-          applyHighlightsToPage(pageIndex, textLayerDiv);
+          const textContent = await page.getTextContent();
+          if (renderedPages.has(pageIndex)) {
+            const textLayerTask = pdfjsLib.renderTextLayer({
+              textContentSource: textContent,
+              container: textLayerDiv,
+              viewport,
+            });
+            await textLayerTask.promise;
+            applyHighlightsToPage(pageIndex, textLayerDiv);
+          }
+        } catch (_) {
+        } finally {
+          page.cleanup();
         }
-      } catch (e) {
-        console.error(`Error rendering text layer for page ${pageNumber}:`, e);
-      } finally {
-        page.cleanup();
-      }
+      })();
     } catch (err) {
       if (err.name !== 'RenderingCancelledException') {
         console.error(`Error rendering page ${pageNumber}:`, err);
@@ -528,10 +563,10 @@
 
   function cancelAllRenders() {
     renderQueue = [];
-    currentlyRendering = false;
-    if (renderTimeoutId !== null) {
-      clearTimeout(renderTimeoutId);
-      renderTimeoutId = null;
+    activeRenders = 0;
+    if (renderRAFId !== null) {
+      cancelAnimationFrame(renderRAFId);
+      renderRAFId = null;
     }
     renderedPages.forEach((data, pageIndex) => {
       if (data.renderTask) {
@@ -1286,17 +1321,19 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #f8fafc;
-    color: #94a3b8;
+    background: var(--bg-surface, #ffffff);
+    color: var(--fg-tertiary, #94a3b8);
+    border-radius: 4px;
   }
 
   .page-badge {
     font-size: 0.8125rem;
     font-weight: 600;
-    color: #94a3b8;
-    background: rgba(0, 0, 0, 0.04);
-    padding: 4px 12px;
+    color: var(--fg-tertiary, #94a3b8);
+    background: rgba(128, 128, 128, 0.08);
+    padding: 6px 14px;
     border-radius: 12px;
+    opacity: 0.6;
   }
 
   :global(.pdf-canvas) {

@@ -16,7 +16,7 @@
 
     // Load library
     const books = await getLibrary();
-    if (books) {
+    if (books && Array.isArray(books)) {
       library.set(books);
     }
   });

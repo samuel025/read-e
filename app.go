@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sync"
@@ -234,6 +235,26 @@ func (a *App) GetChapterWordCount(bookID string, spineIndex int) (int, error) {
 		return 0, err
 	}
 	return reader.ChapterWordCount(spineIndex), nil
+}
+
+func (a *App) GetReadingStats(bookID string, spineIndex int) (epub.BookReadingStats, error) {
+	reader, err := a.getReader(bookID)
+	if err != nil {
+		return epub.BookReadingStats{}, err
+	}
+	totalWords, remWords, chapWords := reader.ReadingStats(spineIndex)
+	bookMins := int(math.Round(float64(remWords) / 220.0))
+	chapMins := int(math.Round(float64(chapWords) / 220.0))
+	if chapMins == 0 && chapWords > 0 {
+		chapMins = 1
+	}
+	return epub.BookReadingStats{
+		TotalWords:      totalWords,
+		RemainingWords:  remWords,
+		ChapterWords:    chapWords,
+		BookMinutesLeft: bookMins,
+		ChapterMinutes:  chapMins,
+	}, nil
 }
 
 func (a *App) SaveSettings(settings epub.AppSettings) error {

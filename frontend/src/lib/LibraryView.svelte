@@ -8,7 +8,7 @@
   const generatingCovers = new Set();
   let showInsights = false;
 
-  $: filteredBooks = $library.filter((b) => {
+  $: filteredBooks = (Array.isArray($library) ? $library : []).filter((b) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -18,12 +18,14 @@
   });
 
   $: {
-    for (const b of $library) {
-      const hasCover = !!(b.coverBase64 || b.cover_base64);
-      const hasTotal = (b.totalCount || 0) > 0;
-      if (b.format === 'pdf' && (!hasCover || !hasTotal) && !generatingCovers.has(b.id)) {
-        generatingCovers.add(b.id);
-        generatePDFCover(b, hasCover);
+    if (Array.isArray($library)) {
+      for (const b of $library) {
+        const hasCover = !!(b.coverBase64 || b.cover_base64);
+        const hasTotal = (b.totalCount || 0) > 0;
+        if (b.format === 'pdf' && (!hasCover || !hasTotal) && !generatingCovers.has(b.id)) {
+          generatingCovers.add(b.id);
+          generatePDFCover(b, hasCover);
+        }
       }
     }
   }
@@ -98,7 +100,7 @@
     libraryLoading.set(true);
     try {
       const books = await scanLibrary(dir);
-      if (books) library.set(books);
+      if (books && Array.isArray(books)) library.set(books);
     } finally {
       libraryLoading.set(false);
     }
@@ -110,7 +112,7 @@
     libraryLoading.set(true);
     try {
       const books = await addBook(file);
-      if (books) library.set(books);
+      if (books && Array.isArray(books)) library.set(books);
     } finally {
       libraryLoading.set(false);
     }
@@ -120,7 +122,7 @@
     const bookId = e.detail;
     await removeBook(bookId);
     const books = await getLibrary();
-    if (books) library.set(books);
+    if (books && Array.isArray(books)) library.set(books);
   }
 
   async function handleToggleFinished(e) {

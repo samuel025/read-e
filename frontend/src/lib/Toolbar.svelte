@@ -7,10 +7,10 @@
   } from '../stores/app.js';
   import {
     saveSettings, saveBookmark, deleteBookmark,
-    getChapterWordCount, getLibrary
+    getChapterWordCount, getReadingStats, getLibrary
   } from './api.js';
 
-  let chapterMinutes = null;
+  let bookStats = null;
 
   function getChapterTitle(spineIndex) {
     function findTitle(entries) {
@@ -26,24 +26,46 @@
     return findTitle($toc) || `Chapter ${spineIndex + 1}`;
   }
 
-  $: if ($currentBookId && $currentSpineIndex !== undefined && $currentBook?.format !== 'pdf') {
-    loadReadingStats($currentBookId, $currentSpineIndex);
+  $: if ($currentBookId && $currentSpineIndex !== undefined) {
+    if ($currentBook?.format !== 'pdf') {
+      loadReadingStats($currentBookId, $currentSpineIndex);
+    }
   }
 
   async function loadReadingStats(bookId, spineIndex) {
     try {
-      const words = await getChapterWordCount(bookId, spineIndex);
-      if (words > 0) {
-        chapterMinutes = Math.max(1, Math.round(words / 220));
-      } else {
-        chapterMinutes = null;
+      const stats = await getReadingStats(bookId, spineIndex);
+      if (stats) {
+        bookStats = stats;
       }
     } catch {
-      chapterMinutes = null;
+      bookStats = null;
     }
   }
 
-  $: displayMinutes = $currentBook?.format === 'pdf' ? $readingStats.minutesLeft : chapterMinutes;
+  function formatTimeLeft(minutes) {
+    if (minutes === null || minutes === undefined) return null;
+    if (minutes <= 0) return '< 1m left';
+    if (minutes < 60) return `~${minutes}m left`;
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return m === 0 ? `~${h}h left` : `~${h}h ${m}m left`;
+  }
+
+  $: minutesRemaining = $currentBook?.format === 'pdf'
+    ? $readingStats.minutesLeft
+    : (bookStats?.bookMinutesLeft ?? null);
+
+  $: chapterMins = $currentBook?.format === 'pdf'
+    ? ($readingStats.chapterMinutes || 1)
+    : (bookStats?.chapterMinutes ?? null);
+
+  $: displayTimeText = formatTimeLeft(minutesRemaining);
+
+  $: tooltipText = minutesRemaining !== null
+    ? `${formatTimeLeft(minutesRemaining)} to complete book • ${chapterMins ? `~${chapterMins}m in ${$currentBook?.format === 'pdf' ? 'page' : 'chapter'}` : ''} (at 220 WPM)`.replace(' •  ', ' ')
+    : 'Estimated reading time at 220 WPM';
+
   $: currentBookmark = $bookmarks.find(b => b.spineIndex === $currentSpineIndex);
   $: isBookmarked = !!currentBookmark;
 
@@ -85,7 +107,9 @@
     currentBookId.set(null);
     try {
       const books = await getLibrary();
-      if (books) library.set(books);
+      if (books && Array.isArray(books) && books.length > 0) {
+        library.set(books);
+      }
     } catch (e) {
       console.error('Failed to refresh library on back:', e);
     }
@@ -189,13 +213,13 @@
         style="width: {$spineCount > 0 ? (($currentSpineIndex + 1) / $spineCount) * 100 : 0}%"
       ></div>
     </div>
-    {#if displayMinutes}
-      <div class="reading-pill" title="Estimated reading time at 220 WPM">
+    {#if displayTimeText}
+      <div class="reading-pill" title={tooltipText}>
         <svg class="pill-clock-svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"></circle>
           <polyline points="12 6 12 12 16 14"></polyline>
         </svg>
-        <span>~{displayMinutes}m left</span>
+        <span>{displayTimeText}</span>
       </div>
     {/if}
   </div>
