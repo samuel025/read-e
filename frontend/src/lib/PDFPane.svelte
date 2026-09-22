@@ -15,6 +15,7 @@
     settings,
     pdfDoc,
     pdfZoom,
+    library,
   } from '../stores/app.js';
   import {
     getPDFData,
@@ -23,6 +24,7 @@
     addHighlight,
     deleteHighlight,
     updateHighlightNote,
+    updateBookTotalCount,
   } from './api.js';
   import { getDocumentPageTexts } from './pdfSearch.js';
 
@@ -179,6 +181,16 @@
       pdfDoc.set(doc);
       numPages = doc.numPages;
       spineCount.set(numPages);
+      if ($currentBookId && numPages > 0) {
+        updateBookTotalCount($currentBookId, numPages);
+        library.update(lib => lib.map(b => {
+          if (b.id === $currentBookId) {
+            const progress = b.finished ? 100 : (numPages > 1 && (b.spineIndex || 0) >= numPages - 1 ? 100 : Math.round(((b.spineIndex || 0) + 1) / numPages * 100));
+            return { ...b, totalCount: numPages, progress };
+          }
+          return b;
+        }));
+      }
 
       const dims = [];
       for (let i = 1; i <= numPages; i++) {
@@ -338,7 +350,14 @@
 
       clearTimeout(saveProgressTimer);
       saveProgressTimer = setTimeout(() => {
-        if ($currentBookId) saveProgress($currentBookId, activeIndex, viewportEl?.scrollTop || 0);
+        if ($currentBookId) {
+          saveProgress($currentBookId, activeIndex, viewportEl?.scrollTop || 0);
+
+          const isAtBottom = viewportEl.scrollTop + viewportEl.clientHeight >= viewportEl.scrollHeight - 60;
+          if ((activeIndex >= numPages - 1 || isAtBottom) && numPages > 1) {
+            library.update(lib => lib.map(b => b.id === $currentBookId ? { ...b, finished: true, progress: 100 } : b));
+          }
+        }
       }, 600);
     });
   }

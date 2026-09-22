@@ -11,4 +11,8 @@ type BookMeta struct {
 	AddedAt     time.Time `json:"addedAt"`
 	HasProgress bool      `json:"hasProgress"`
 	Format      string    `json:"format"`
+	SpineIndex  int       `json:"spineIndex"`
+	TotalCount  int       `json:"totalCount"`
+	Finished    bool      `json:"finished"`
+	Progress    float64   `json:"progress"`
 }

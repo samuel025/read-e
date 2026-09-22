@@ -1,6 +1,6 @@
 <script>
   import { library, libraryLoading, settings, settingsOpen } from '../stores/app.js';
-  import { scanLibrary, addBook, selectFolder, selectFile, getLibrary, removeBook, getPDFData, updateBookCover } from './api.js';
+  import { scanLibrary, addBook, selectFolder, selectFile, getLibrary, removeBook, getPDFData, updateBookCover, updateBookTotalCount, markBookFinished } from './api.js';
   import BookCard from './BookCard.svelte';
   import InsightsModal from './InsightsModal.svelte';
 
@@ -19,14 +19,16 @@
 
   $: {
     for (const b of $library) {
-      if (b.format === 'pdf' && !b.cover_base64 && !generatingCovers.has(b.id)) {
+      const hasCover = !!(b.coverBase64 || b.cover_base64);
+      const hasTotal = (b.totalCount || 0) > 0;
+      if (b.format === 'pdf' && (!hasCover || !hasTotal) && !generatingCovers.has(b.id)) {
         generatingCovers.add(b.id);
-        generatePDFCover(b);
+        generatePDFCover(b, hasCover);
       }
     }
   }
 
-  async function generatePDFCover(book) {
+  async function generatePDFCover(book, alreadyHasCover = false) {
     try {
       const pdfjsLib = await import('pdfjs-dist');
       const pdfjsWorker = (await import('pdfjs-dist/build/pdf.worker.min.js?url')).default;
@@ -42,35 +44,51 @@
       });
 
       const doc = await loadingTask.promise;
-      const page = await doc.getPage(1);
+      if (doc.numPages > 0) {
+        await updateBookTotalCount(book.id, doc.numPages);
+      }
 
-      const viewport = page.getViewport({ scale: 1.0 });
-      const scale = 400 / viewport.width;
-      const scaledViewport = page.getViewport({ scale });
+      let base64 = book.coverBase64 || book.cover_base64 || '';
+      if (!alreadyHasCover) {
+        const page = await doc.getPage(1);
 
-      const canvas = document.createElement('canvas');
-      canvas.width = scaledViewport.width;
-      canvas.height = scaledViewport.height;
-      const ctx = canvas.getContext('2d');
+        const viewport = page.getViewport({ scale: 1.0 });
+        const scale = 400 / viewport.width;
+        const scaledViewport = page.getViewport({ scale });
 
-      await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+        const canvas = document.createElement('canvas');
+        canvas.width = scaledViewport.width;
+        canvas.height = scaledViewport.height;
+        const ctx = canvas.getContext('2d');
 
-      // Extract as JPEG base64 (remove the prefix because backend usually expects raw base64, but Svelte bindings pass strings. Actually wait!
-      // Does BookCard expect the full 'data:image/jpeg;base64,...' string? Yes, `src={book.cover_base64}`.
-      const base64 = canvas.toDataURL('image/jpeg', 0.8);
-      await updateBookCover(book.id, base64);
+        await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+
+        base64 = canvas.toDataURL('image/jpeg', 0.8);
+        await updateBookCover(book.id, base64);
+      }
 
       library.update(lib => {
-        const idx = lib.findIndex(l => l.id === book.id);
-        if (idx !== -1) {
-          lib[idx].cover_base64 = base64;
-        }
-        return lib;
+        return lib.map(l => {
+          if (l.id === book.id) {
+            const totalCount = doc.numPages || l.totalCount || 0;
+            const progress = l.finished ? 100 : (totalCount > 0 && l.hasProgress ? Math.round(((l.spineIndex || 0) + 1) / totalCount * 100) : (l.hasProgress ? 5 : 0));
+            return {
+              ...l,
+              coverBase64: base64,
+              cover_base64: base64,
+              totalCount,
+              progress,
+            };
+          }
+          return l;
+        });
       });
 
       doc.destroy();
     } catch (e) {
-      console.error('Failed to generate cover for', book.title, e);
+      console.error('Failed to process PDF cover / count for', book.title, e);
+    } finally {
+      generatingCovers.delete(book.id);
     }
   }
 
@@ -103,6 +121,24 @@
     await removeBook(bookId);
     const books = await getLibrary();
     if (books) library.set(books);
+  }
+
+  async function handleToggleFinished(e) {
+    const { bookId, finished } = e.detail;
+    await markBookFinished(bookId, finished);
+    library.update(lib => {
+      return lib.map(b => {
+        if (b.id === bookId) {
+          const progress = finished ? 100 : (b.totalCount > 0 && b.hasProgress ? Math.round(((b.spineIndex || 0) + 1) / b.totalCount * 100) : (b.hasProgress ? 5 : 0));
+          return {
+            ...b,
+            finished,
+            progress,
+          };
+        }
+        return b;
+      });
+    });
   }
 </script>
 
@@ -202,7 +238,11 @@
       <div class="book-grid">
         {#each filteredBooks as book, i (book.id)}
           <div class="stagger-item" style="animation-delay: {Math.min(i * 50, 500)}ms">
-            <BookCard {book} on:remove={handleRemoveBook} />
+            <BookCard
+              {book}
+              on:remove={handleRemoveBook}
+              on:toggle-finished={handleToggleFinished}
+            />
           </div>
         {/each}
       </div>

@@ -3,11 +3,11 @@
     view, currentBook, currentBookId, currentSpineIndex,
     spineCount, tocOpen, settings, settingsOpen,
     activeSidebarTab, highlights, bookmarks, searchOpen, toc,
-    pdfZoom, readingStats
+    pdfZoom, readingStats, library
   } from '../stores/app.js';
   import {
     saveSettings, saveBookmark, deleteBookmark,
-    getChapterWordCount
+    getChapterWordCount, getLibrary
   } from './api.js';
 
   let chapterMinutes = null;
@@ -79,10 +79,16 @@
     }
   }
 
-  function goBack() {
+  async function goBack() {
     view.set('library');
     currentBook.set(null);
     currentBookId.set(null);
+    try {
+      const books = await getLibrary();
+      if (books) library.set(books);
+    } catch (e) {
+      console.error('Failed to refresh library on back:', e);
+    }
   }
 
   function toggleTOC() {

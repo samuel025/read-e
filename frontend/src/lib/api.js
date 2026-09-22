@@ -45,6 +45,12 @@ export async function updateBookCover(bookID, coverBase64) {
   return go.UpdateBookCover(bookID, coverBase64);
 }
 
+export async function updateBookTotalCount(bookID, totalCount) {
+  const go = getGoBinding();
+  if (!go) return;
+  return go.UpdateBookTotalCount(bookID, totalCount);
+}
+
 export async function logReadingSession(date, durationSecs, pagesTurned) {
   const go = getGoBinding();
   if (!go) return;

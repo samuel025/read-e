@@ -3,7 +3,7 @@
   import TOCSidebar from './TOCSidebar.svelte';
   import ChapterPane from './ChapterPane.svelte';
   import PDFPane from './PDFPane.svelte';
-  import { tocOpen, currentBook, currentBookId, highlights, bookmarks, currentSpineIndex, spineCount } from '../stores/app.js';
+  import { tocOpen, currentBook, currentBookId, highlights, bookmarks, currentSpineIndex, spineCount, library } from '../stores/app.js';
   import { getHighlights, getBookmarks } from './api.js';
 
   import { onMount, onDestroy } from 'svelte';
@@ -62,11 +62,13 @@
       markActive();
     }
     prevSpine = $currentSpineIndex;
-    
-    if ($currentSpineIndex !== null && $spineCount && $currentSpineIndex >= $spineCount - 1) {
-      if ($currentBookId) {
-        markBookFinished($currentBookId, true).catch(() => {});
-      }
+  }
+
+  // Auto-detect finish when user reaches the last chapter/page
+  $: {
+    if ($currentBookId && $spineCount > 1 && $currentSpineIndex !== null && $currentSpineIndex >= $spineCount - 1) {
+      markBookFinished($currentBookId, true).catch(() => {});
+      library.update(lib => lib.map(b => b.id === $currentBookId ? { ...b, finished: true, progress: 100 } : b));
     }
   }
 </script>

@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,6 +101,9 @@ func (s *Store) migrate() error {
 	// Safely add format column if migrating existing database
 	_, _ = s.db.Exec("ALTER TABLE books ADD COLUMN format TEXT NOT NULL DEFAULT 'epub';")
 
+	// Safely add total_count column if migrating existing database
+	_, _ = s.db.Exec("ALTER TABLE books ADD COLUMN total_count INTEGER NOT NULL DEFAULT 0;")
+
 	// Safely add finished column to progress if migrating existing database
 	_, _ = s.db.Exec("ALTER TABLE progress ADD COLUMN finished BOOLEAN NOT NULL DEFAULT 0;")
 
@@ -111,6 +115,40 @@ func (s *Store) migrate() error {
 			pages_turned INTEGER NOT NULL DEFAULT 0
 		);
 	`)
+
+	// Backfill any existing books with total_count <= 0
+	rows, err := s.db.Query("SELECT id, file_path, format FROM books WHERE total_count <= 0")
+	if err == nil {
+		type fixItem struct {
+			id    string
+			count int
+		}
+		var fixes []fixItem
+		for rows.Next() {
+			var id, path, format string
+			if err := rows.Scan(&id, &path, &format); err == nil {
+				if _, statErr := os.Stat(path); statErr == nil {
+					var count int
+					if format == "pdf" {
+						count = library.CountPDFPages(path)
+					} else {
+						if r, err := epub.Open(path); err == nil {
+							count = r.Info().SpineCount
+							r.Close()
+						}
+					}
+					if count > 0 {
+						fixes = append(fixes, fixItem{id: id, count: count})
+					}
+				}
+			}
+		}
+		rows.Close()
+
+		for _, fix := range fixes {
+			_, _ = s.db.Exec("UPDATE books SET total_count = ? WHERE id = ?", fix.count, fix.id)
+		}
+	}
 
 	return nil
 }
@@ -125,15 +163,16 @@ func (s *Store) UpsertBook(b library.BookMeta) error {
 		}
 	}
 	_, err := s.db.Exec(`
-		INSERT INTO books (id, title, author, file_path, cover_base64, format, added_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO books (id, title, author, file_path, cover_base64, format, total_count, added_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			title = excluded.title,
 			author = excluded.author,
 			file_path = excluded.file_path,
 			cover_base64 = excluded.cover_base64,
-			format = excluded.format
-	`, b.ID, b.Title, b.Author, b.FilePath, b.CoverBase64, format, b.AddedAt)
+			format = excluded.format,
+			total_count = CASE WHEN excluded.total_count > 0 THEN excluded.total_count ELSE books.total_count END
+	`, b.ID, b.Title, b.Author, b.FilePath, b.CoverBase64, format, b.TotalCount, b.AddedAt)
 	return err
 }
 
@@ -142,9 +181,17 @@ func (s *Store) UpdateBookCover(id string, coverBase64 string) error {
 	return err
 }
 
+func (s *Store) UpdateBookTotalCount(id string, totalCount int) error {
+	_, err := s.db.Exec("UPDATE books SET total_count = ? WHERE id = ?", totalCount, id)
+	return err
+}
+
 func (s *Store) GetBooks() ([]library.BookMeta, error) {
 	rows, err := s.db.Query(`
-		SELECT b.id, b.title, b.author, b.file_path, b.cover_base64, b.format, b.added_at,
+		SELECT b.id, b.title, b.author, b.file_path, b.cover_base64, b.format,
+		       COALESCE(b.total_count, 0), b.added_at,
+		       COALESCE(p.spine_index, 0) as spine_index,
+		       COALESCE(p.finished, 0) as finished,
 		       CASE WHEN p.book_id IS NOT NULL THEN 1 ELSE 0 END as has_progress
 		FROM books b
 		LEFT JOIN progress p ON b.id = p.book_id
@@ -158,11 +205,51 @@ func (s *Store) GetBooks() ([]library.BookMeta, error) {
 	var books []library.BookMeta
 	for rows.Next() {
 		var b library.BookMeta
-		var hasProgress int
-		if err := rows.Scan(&b.ID, &b.Title, &b.Author, &b.FilePath, &b.CoverBase64, &b.Format, &b.AddedAt, &hasProgress); err != nil {
+		var hasProgress, finished, spineIndex, totalCount int
+		if err := rows.Scan(&b.ID, &b.Title, &b.Author, &b.FilePath, &b.CoverBase64, &b.Format, &totalCount, &b.AddedAt, &spineIndex, &finished, &hasProgress); err != nil {
 			return nil, err
 		}
+		b.TotalCount = totalCount
 		b.HasProgress = hasProgress == 1
+		b.Finished = finished == 1
+		b.SpineIndex = spineIndex
+
+		// On-the-fly resolution if total_count is still 0
+		if b.TotalCount <= 0 {
+			if b.Format == "pdf" {
+				b.TotalCount = library.CountPDFPages(b.FilePath)
+			} else {
+				if r, err := epub.Open(b.FilePath); err == nil {
+					b.TotalCount = r.Info().SpineCount
+					r.Close()
+				}
+			}
+			if b.TotalCount > 0 {
+				_, _ = s.db.Exec("UPDATE books SET total_count = ? WHERE id = ?", b.TotalCount, b.ID)
+			}
+		}
+
+		if b.Finished {
+			b.Progress = 100.0
+		} else if b.TotalCount > 0 && b.HasProgress {
+			if b.TotalCount > 1 && b.SpineIndex >= b.TotalCount-1 {
+				b.Progress = 100.0
+				b.Finished = true
+				_, _ = s.db.Exec("UPDATE progress SET finished = 1 WHERE book_id = ?", b.ID)
+			} else {
+				pct := float64(spineIndex+1) / float64(b.TotalCount) * 100.0
+				if pct > 100.0 {
+					pct = 100.0
+				}
+				b.Progress = math.Round(pct*10) / 10
+				if b.Progress >= 100.0 {
+					b.Finished = true
+					_, _ = s.db.Exec("UPDATE progress SET finished = 1 WHERE book_id = ?", b.ID)
+				}
+			}
+		} else {
+			b.Progress = 0.0
+		}
 		books = append(books, b)
 	}
 	return books, rows.Err()
@@ -170,11 +257,13 @@ func (s *Store) GetBooks() ([]library.BookMeta, error) {
 
 func (s *Store) GetBook(bookID string) (library.BookMeta, error) {
 	var b library.BookMeta
+	var totalCount int
 	err := s.db.QueryRow(`
-		SELECT id, title, author, file_path, cover_base64, format, added_at
+		SELECT id, title, author, file_path, cover_base64, format, COALESCE(total_count, 0), added_at
 		FROM books
 		WHERE id = ?
-	`, bookID).Scan(&b.ID, &b.Title, &b.Author, &b.FilePath, &b.CoverBase64, &b.Format, &b.AddedAt)
+	`, bookID).Scan(&b.ID, &b.Title, &b.Author, &b.FilePath, &b.CoverBase64, &b.Format, &totalCount, &b.AddedAt)
+	b.TotalCount = totalCount
 	return b, err
 }
 
@@ -184,14 +273,23 @@ func (s *Store) RemoveBook(bookID string) error {
 }
 
 func (s *Store) SaveProgress(pos epub.ReadingPosition) error {
+	var totalCount int
+	_ = s.db.QueryRow("SELECT COALESCE(total_count, 0) FROM books WHERE id = ?", pos.BookID).Scan(&totalCount)
+
+	isFinished := 0
+	if totalCount > 1 && pos.SpineIndex >= totalCount-1 {
+		isFinished = 1
+	}
+
 	_, err := s.db.Exec(`
-		INSERT INTO progress (book_id, spine_index, scroll_offset, updated_at)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO progress (book_id, spine_index, scroll_offset, finished, updated_at)
+		VALUES (?, ?, ?, ?, ?)
 		ON CONFLICT(book_id) DO UPDATE SET
 			spine_index = excluded.spine_index,
 			scroll_offset = excluded.scroll_offset,
+			finished = CASE WHEN ? = 1 THEN 1 ELSE progress.finished END,
 			updated_at = excluded.updated_at
-	`, pos.BookID, pos.SpineIndex, pos.ScrollOffset, time.Now())
+	`, pos.BookID, pos.SpineIndex, pos.ScrollOffset, isFinished, time.Now(), isFinished)
 	return err
 }
 
@@ -345,13 +443,19 @@ func (s *Store) LogReadingSession(date string, durationSecs int, pagesTurned int
 }
 
 func (s *Store) MarkBookFinished(bookID string, finished bool) error {
-	val := 0
 	if finished {
-		val = 1
+		_, err := s.db.Exec(`
+			INSERT INTO progress (book_id, spine_index, scroll_offset, finished, updated_at)
+			VALUES (?, 0, 0, 1, CURRENT_TIMESTAMP)
+			ON CONFLICT(book_id) DO UPDATE SET
+				finished = 1,
+				updated_at = CURRENT_TIMESTAMP
+		`, bookID)
+		return err
 	}
 	_, err := s.db.Exec(`
-		UPDATE progress SET finished = ?, updated_at = CURRENT_TIMESTAMP WHERE book_id = ?
-	`, val, bookID)
+		UPDATE progress SET finished = 0, spine_index = 0, scroll_offset = 0, updated_at = CURRENT_TIMESTAMP WHERE book_id = ?
+	`, bookID)
 	return err
 }
 

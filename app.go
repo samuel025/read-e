@@ -103,6 +103,10 @@ func (a *App) UpdateBookCover(bookID string, coverBase64 string) error {
 	return a.store.UpdateBookCover(bookID, coverBase64)
 }
 
+func (a *App) UpdateBookTotalCount(bookID string, totalCount int) error {
+	return a.store.UpdateBookTotalCount(bookID, totalCount)
+}
+
 func (a *App) LogReadingSession(date string, durationSecs int, pagesTurned int) error {
 	return a.store.LogReadingSession(date, durationSecs, pagesTurned)
 }
@@ -129,10 +133,18 @@ func (a *App) RemoveBook(bookID string) error {
 func (a *App) OpenBook(bookID string) (epub.BookInfo, error) {
 	meta, err := a.store.GetBook(bookID)
 	if err == nil && meta.Format == "pdf" {
+		totalCount := meta.TotalCount
+		if totalCount <= 0 {
+			totalCount = library.CountPDFPages(meta.FilePath)
+			if totalCount > 0 {
+				_ = a.store.UpdateBookTotalCount(bookID, totalCount)
+			}
+		}
 		return epub.BookInfo{
-			Title:  meta.Title,
-			Author: meta.Author,
-			Format: "pdf",
+			Title:      meta.Title,
+			Author:     meta.Author,
+			Format:     "pdf",
+			SpineCount: totalCount,
 		}, nil
 	}
 
@@ -142,6 +154,9 @@ func (a *App) OpenBook(bookID string) (epub.BookInfo, error) {
 	}
 	info := reader.Info()
 	info.Format = "epub"
+	if err == nil && meta.TotalCount <= 0 && info.SpineCount > 0 {
+		_ = a.store.UpdateBookTotalCount(bookID, info.SpineCount)
+	}
 	return info, nil
 }
 

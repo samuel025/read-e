@@ -216,4 +216,75 @@ func TestStore(t *testing.T) {
 			t.Fatalf("expected 0 bookmarks after book removal, got %d", len(bookmarks))
 		}
 	})
+
+	// 3. Tracking and Finished test
+	t.Run("Tracking and Finished", func(t *testing.T) {
+		book := library.BookMeta{
+			ID:         "book-gentle",
+			Title:      "Gentle and Lowly",
+			Author:     "Dane Ortlund",
+			FilePath:   "/path/to/gentle.epub",
+			Format:     "epub",
+			TotalCount: 37,
+			AddedAt:    time.Now().UTC(),
+		}
+		if err := st.UpsertBook(book); err != nil {
+			t.Fatalf("failed to upsert book: %v", err)
+		}
+
+		// Save progress at spineIndex 34 (chapter 35 of 37)
+		if err := st.SaveProgress(epub.ReadingPosition{
+			BookID:     "book-gentle",
+			SpineIndex: 34,
+		}); err != nil {
+			t.Fatalf("failed to save progress: %v", err)
+		}
+
+		books, err := st.GetBooks()
+		if err != nil {
+			t.Fatalf("failed to get books: %v", err)
+		}
+		if len(books) != 1 {
+			t.Fatalf("expected 1 book, got %d", len(books))
+		}
+		// 35 / 37 = 94.59% -> 94.6%
+		if books[0].Progress != 94.6 {
+			t.Errorf("expected progress 94.6, got %f", books[0].Progress)
+		}
+		if books[0].Finished {
+			t.Errorf("expected finished to be false at chapter 34/37")
+		}
+
+		// Save progress at last spine item: index 36 (37 of 37)
+		if err := st.SaveProgress(epub.ReadingPosition{
+			BookID:     "book-gentle",
+			SpineIndex: 36,
+		}); err != nil {
+			t.Fatalf("failed to save progress: %v", err)
+		}
+
+		books, err = st.GetBooks()
+		if err != nil {
+			t.Fatalf("failed to get books: %v", err)
+		}
+		if books[0].Progress != 100.0 {
+			t.Errorf("expected progress 100.0 at last chapter, got %f", books[0].Progress)
+		}
+		if !books[0].Finished {
+			t.Errorf("expected finished to be true at last chapter")
+		}
+
+		// Explicitly mark unfinished
+		if err := st.MarkBookFinished("book-gentle", false); err != nil {
+			t.Fatalf("failed to mark book unfinished: %v", err)
+		}
+		books, err = st.GetBooks()
+		if err != nil {
+			t.Fatalf("failed to get books: %v", err)
+		}
+		if books[0].Finished {
+			t.Errorf("expected finished to be false after explicit unmark")
+		}
+	})
 }
+
