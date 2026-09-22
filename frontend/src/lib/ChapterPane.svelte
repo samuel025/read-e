@@ -1450,6 +1450,16 @@
     };
   });
 
+  let saveProgressTimer = null;
+  let scrollDebounceTimer = null;
+
+  function flushProgress() {
+    if ($currentBookId && iframeEl?.contentWindow) {
+      const scrollY = Math.round(iframeEl.contentWindow.scrollY || iframeEl.contentWindow.document?.documentElement?.scrollTop || 0);
+      saveProgress($currentBookId, $currentSpineIndex, scrollY);
+    }
+  }
+
   function handleIframeLoad() {
     if (!iframeEl?.contentWindow) return;
 
@@ -1461,7 +1471,7 @@
       }, 100);
     } else {
       getProgress($currentBookId).then((pos) => {
-        if (pos?.scrollOffset && iframeEl?.contentWindow) {
+        if (pos && pos.spineIndex === $currentSpineIndex && pos.scrollOffset && iframeEl?.contentWindow) {
           iframeEl.contentWindow.scrollTo(0, pos.scrollOffset);
         }
       });
@@ -1475,28 +1485,34 @@
       }, '*');
     }
 
+    try {
+      iframeEl.contentWindow.addEventListener('scroll', () => {
+        if (scrollDebounceTimer) clearTimeout(scrollDebounceTimer);
+        scrollDebounceTimer = setTimeout(() => {
+          flushProgress();
+        }, 500);
+      }, { passive: true });
+    } catch (_) {}
+
     if (saveProgressTimer) {
       clearInterval(saveProgressTimer);
     }
     saveProgressTimer = setInterval(() => {
-      if (iframeEl?.contentWindow && $currentBookId) {
-        const scrollY = iframeEl.contentWindow.scrollY || 0;
-        saveProgress($currentBookId, $currentSpineIndex, scrollY);
-      }
-    }, 5000);
-
-    iframeEl.addEventListener('load', () => {
-      if (saveProgressTimer) clearInterval(saveProgressTimer);
-    }, { once: true });
+      flushProgress();
+    }, 4000);
   }
-
-  let saveProgressTimer = null;
 
   onDestroy(() => {
     if (saveProgressTimer) {
       clearInterval(saveProgressTimer);
       saveProgressTimer = null;
     }
+    if (scrollDebounceTimer) {
+      clearTimeout(scrollDebounceTimer);
+      scrollDebounceTimer = null;
+    }
+    flushProgress();
+
     if (iframeEl) {
       try {
         iframeEl.srcdoc = '';

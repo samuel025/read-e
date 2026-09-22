@@ -7,7 +7,7 @@
   } from '../stores/app.js';
   import {
     saveSettings, saveBookmark, deleteBookmark,
-    getChapterWordCount, getReadingStats, getLibrary, releaseMemory
+    getChapterWordCount, getReadingStats, getLibrary, releaseMemory, saveProgress
   } from './api.js';
 
   let bookStats = null;
@@ -102,6 +102,18 @@
   }
 
   async function goBack() {
+    if ($currentBookId) {
+      if ($currentBook?.format !== 'pdf') {
+        const iframe = document.querySelector('.chapter-frame');
+        if (iframe?.contentWindow) {
+          const scrollY = Math.round(iframe.contentWindow.scrollY || iframe.contentWindow.document?.documentElement?.scrollTop || 0);
+          try {
+            await saveProgress($currentBookId, $currentSpineIndex, scrollY);
+          } catch (_) {}
+        }
+      }
+    }
+
     view.set('library');
     currentBook.set(null);
     currentBookId.set(null);

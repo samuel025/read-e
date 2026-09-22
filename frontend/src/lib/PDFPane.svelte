@@ -53,6 +53,7 @@
   let scrollRAF = null;
   let saveProgressTimer = null;
   let resizeObserver = null;
+  let isRestoringPosition = false;
 
   let selectionToolbar = {
     visible: false,
@@ -152,7 +153,17 @@
 
     try {
       if (scrollRAF) cancelAnimationFrame(scrollRAF);
-      if (saveProgressTimer) clearTimeout(saveProgressTimer);
+      if (saveProgressTimer) {
+        clearTimeout(saveProgressTimer);
+        saveProgressTimer = null;
+      }
+
+      if ($currentBookId && viewportEl && pageTops.length > 0) {
+        const activeIndex = getActivePageIndex();
+        const pageTop = pageTops[activeIndex] || 0;
+        const pageOffset = Math.max(0, Math.round(viewportEl.scrollTop - pageTop));
+        saveProgress($currentBookId, activeIndex, pageOffset);
+      }
 
       if (resizeObserver) {
         resizeObserver.disconnect();
@@ -348,7 +359,11 @@
       if (pos && typeof pos.spineIndex === 'number' && pos.spineIndex >= 0) {
         currentSpineIndex.set(pos.spineIndex);
         await tick();
-        scrollToPage(pos.spineIndex + 1, pos.scrollOffset || 0);
+        isRestoringPosition = true;
+        scrollToPage(pos.spineIndex + 1, pos.scrollOffset || 0, 'auto');
+        setTimeout(() => {
+          isRestoringPosition = false;
+        }, 400);
       } else {
         queueVisiblePages(0);
         scheduleRender();
@@ -393,17 +408,21 @@
       queueVisiblePages(activeIndex);
       scheduleRender();
 
+      if (isRestoringPosition) return;
+
       clearTimeout(saveProgressTimer);
       saveProgressTimer = setTimeout(() => {
-        if ($currentBookId) {
-          saveProgress($currentBookId, activeIndex, viewportEl?.scrollTop || 0);
+        if ($currentBookId && viewportEl && pageTops.length > 0) {
+          const pageTop = pageTops[activeIndex] || 0;
+          const pageOffset = Math.max(0, Math.round(viewportEl.scrollTop - pageTop));
+          saveProgress($currentBookId, activeIndex, pageOffset);
 
           const isAtBottom = viewportEl.scrollTop + viewportEl.clientHeight >= viewportEl.scrollHeight - 60;
           if ((activeIndex >= numPages - 1 || isAtBottom) && numPages > 1) {
             library.update(lib => lib.map(b => b.id === $currentBookId ? { ...b, finished: true, progress: 100 } : b));
           }
         }
-      }, 600);
+      }, 500);
     });
   }
 
@@ -1000,11 +1019,17 @@
     activeNotePopover = null;
   }
 
-  function scrollToPage(pageNumber, offsetTop = 0) {
+  function scrollToPage(pageNumber, offsetTop = 0, behavior = 'smooth') {
     if (!viewportEl) return;
     const pageIndex = Math.max(0, Math.min(numPages - 1, pageNumber - 1));
-    const targetScroll = (pageTops[pageIndex] || 0) + offsetTop;
-    viewportEl.scrollTo({ top: targetScroll, behavior: 'smooth' });
+    const pageTop = pageTops[pageIndex] || 0;
+    let targetScroll;
+    if (offsetTop >= pageTop && pageTop > 0) {
+      targetScroll = offsetTop;
+    } else {
+      targetScroll = pageTop + Math.max(0, offsetTop);
+    }
+    viewportEl.scrollTo({ top: targetScroll, behavior });
     currentSpineIndex.set(pageIndex);
     updateMinutesRemaining(pageIndex);
     queueVisiblePages(pageIndex);
