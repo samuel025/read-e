@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -435,44 +437,200 @@ type DictionaryEntry struct {
 	Cached    bool           `json:"cached"`
 }
 
-// LookupWord searches local SQLite cache first, then Free Dictionary API, caching results
-func (a *App) LookupWord(rawWord string) (*DictionaryEntry, error) {
-	cleanWord := strings.TrimSpace(rawWord)
-	cleanWord = strings.Trim(cleanWord, "\"'“”‘’.,;:!?()[]{}<>-—_`*~/\\")
-	cleanWord = strings.ToLower(cleanWord)
-	if cleanWord == "" || len(cleanWord) > 60 {
-		return nil, fmt.Errorf("invalid word")
-	}
+var (
+	dictHTMLTagRegex    = regexp.MustCompile(`<[^>]+>`)
+	dictHTMLStyleRegex  = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
+	dictHTMLScriptRegex = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
+)
 
-	// 1. Check local SQLite cache
-	cachedJSON, err := a.store.GetCachedDefinition(cleanWord)
-	if err == nil && cachedJSON != "" {
-		var entry DictionaryEntry
-		if jsonErr := json.Unmarshal([]byte(cachedJSON), &entry); jsonErr == nil {
-			entry.Cached = true
-			return &entry, nil
+func cleanDictionaryHTML(text string) string {
+	if text == "" {
+		return ""
+	}
+	text = dictHTMLStyleRegex.ReplaceAllString(text, "")
+	text = dictHTMLScriptRegex.ReplaceAllString(text, "")
+	text = dictHTMLTagRegex.ReplaceAllString(text, "")
+	text = html.UnescapeString(text)
+	return strings.TrimSpace(strings.Join(strings.Fields(text), " "))
+}
+
+// fetchDatamuseInfo queries Datamuse for IPA phonetics and synonyms with a short timeout
+func fetchDatamuseInfo(word string) (string, []string) {
+	ipaURL := fmt.Sprintf("https://api.datamuse.com/words?sp=%s&qe=sp&md=r&ipa=1", url.QueryEscape(word))
+	synURL := fmt.Sprintf("https://api.datamuse.com/words?rel_syn=%s&max=6", url.QueryEscape(word))
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	var ipa string
+	var synonyms []string
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		resp, err := client.Get(ipaURL)
+		if err != nil {
+			return
 		}
-	}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return
+		}
+		var items []struct {
+			Word string   `json:"word"`
+			Tags []string `json:"tags"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&items); err == nil && len(items) > 0 {
+			for _, item := range items {
+				if strings.EqualFold(item.Word, word) {
+					for _, tag := range item.Tags {
+						if strings.HasPrefix(tag, "ipa_pron:") {
+							val := strings.TrimPrefix(tag, "ipa_pron:")
+							if val != "" {
+								ipa = "/" + val + "/"
+								return
+							}
+						}
+					}
+				}
+			}
+		}
+	}()
 
-	// 2. Query Free Dictionary API
-	apiURL := fmt.Sprintf("https://api.dictionaryapi.dev/api/v2/entries/en/%s", url.PathEscape(cleanWord))
-	client := &http.Client{Timeout: 4 * time.Second}
-	resp, err := client.Get(apiURL)
+	go func() {
+		defer wg.Done()
+		resp, err := client.Get(synURL)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return
+		}
+		var items []struct {
+			Word string `json:"word"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&items); err == nil {
+			for _, item := range items {
+				if item.Word != "" && !strings.EqualFold(item.Word, word) {
+					synonyms = append(synonyms, item.Word)
+				}
+			}
+		}
+	}()
+
+	wg.Wait()
+	return ipa, synonyms
+}
+
+// lookupWiktionary queries the fast, reliable Wiktionary REST API
+func lookupWiktionary(word string) (*DictionaryEntry, error) {
+	apiWord := strings.ReplaceAll(word, " ", "_")
+	apiURL := fmt.Sprintf("https://en.wiktionary.org/api/rest_v1/page/definition/%s", url.PathEscape(apiWord))
+
+	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("could not connect to dictionary service: %w", err)
+		return nil, err
+	}
+	req.Header.Set("User-Agent", "Read-e/1.0 (https://github.com/samuel025/read-e; desktop epub reader)")
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("no definition found for '%s'", cleanWord)
+		return nil, fmt.Errorf("no definition found for '%s'", word)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("dictionary returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("wiktionary returned status %d", resp.StatusCode)
+	}
+
+	var data map[string][]struct {
+		PartOfSpeech string `json:"partOfSpeech"`
+		Definitions  []struct {
+			Definition string   `json:"definition"`
+			Examples   []string `json:"examples"`
+		} `json:"definitions"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, err
+	}
+
+	enItems, ok := data["en"]
+	if !ok || len(enItems) == 0 {
+		return nil, fmt.Errorf("no english definitions for '%s'", word)
+	}
+
+	entry := &DictionaryEntry{
+		Word:   word,
+		Cached: false,
+	}
+
+	for _, item := range enItems {
+		meaning := MeaningItem{
+			PartOfSpeech: item.PartOfSpeech,
+		}
+		for _, d := range item.Definitions {
+			defText := cleanDictionaryHTML(d.Definition)
+			if defText == "" {
+				continue
+			}
+			var exampleText string
+			for _, ex := range d.Examples {
+				cleanedEx := cleanDictionaryHTML(ex)
+				if cleanedEx != "" {
+					exampleText = cleanedEx
+					break
+				}
+			}
+			meaning.Definitions = append(meaning.Definitions, DefinitionItem{
+				Definition: defText,
+				Example:    exampleText,
+			})
+		}
+		if len(meaning.Definitions) > 0 {
+			entry.Meanings = append(entry.Meanings, meaning)
+		}
+	}
+
+	if len(entry.Meanings) == 0 {
+		return nil, fmt.Errorf("no valid definitions found for '%s'", word)
+	}
+
+	// Fetch IPA and related synonyms asynchronously
+	ipa, syns := fetchDatamuseInfo(word)
+	if ipa != "" {
+		entry.Phonetic = ipa
+		entry.Phonetics = append(entry.Phonetics, PhoneticItem{Text: ipa})
+	}
+	if len(syns) > 0 && len(entry.Meanings) > 0 {
+		entry.Meanings[0].Synonyms = syns
+	}
+
+	return entry, nil
+}
+
+// lookupFreeDictionaryAPI queries api.dictionaryapi.dev as a secondary fallback
+func lookupFreeDictionaryAPI(word string) (*DictionaryEntry, error) {
+	apiURL := fmt.Sprintf("https://api.dictionaryapi.dev/api/v2/entries/en/%s", url.PathEscape(word))
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(apiURL)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %d", resp.StatusCode)
 	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read dictionary response: %w", err)
+		return nil, err
 	}
 
 	var rawEntries []struct {
@@ -494,17 +652,16 @@ func (a *App) LookupWord(rawWord string) (*DictionaryEntry, error) {
 	}
 
 	if err := json.Unmarshal(bodyBytes, &rawEntries); err != nil || len(rawEntries) == 0 {
-		return nil, fmt.Errorf("no definition found for '%s'", cleanWord)
+		return nil, fmt.Errorf("empty response")
 	}
 
 	first := rawEntries[0]
-	entry := DictionaryEntry{
+	entry := &DictionaryEntry{
 		Word:     first.Word,
 		Phonetic: first.Phonetic,
 		Cached:   false,
 	}
 
-	// Extract phonetics
 	for _, p := range first.Phonetics {
 		if p.Audio != "" || p.Text != "" {
 			entry.Phonetics = append(entry.Phonetics, PhoneticItem{
@@ -522,7 +679,6 @@ func (a *App) LookupWord(rawWord string) (*DictionaryEntry, error) {
 		}
 	}
 
-	// Extract meanings
 	for _, m := range first.Meanings {
 		meaning := MeaningItem{
 			PartOfSpeech: m.PartOfSpeech,
@@ -538,11 +694,47 @@ func (a *App) LookupWord(rawWord string) (*DictionaryEntry, error) {
 		entry.Meanings = append(entry.Meanings, meaning)
 	}
 
-	// 3. Persist to SQLite cache
-	if encoded, err := json.Marshal(entry); err == nil {
-		_ = a.store.SaveCachedDefinition(cleanWord, string(encoded))
+	return entry, nil
+}
+
+// LookupWord searches local SQLite cache first, then Wiktionary, then Free Dictionary API fallback
+func (a *App) LookupWord(rawWord string) (*DictionaryEntry, error) {
+	cleanWord := strings.TrimSpace(rawWord)
+	cleanWord = strings.Trim(cleanWord, "\"'“”‘’.,;:!?()[]{}<>-—_`*~/\\")
+	cleanWord = strings.ToLower(cleanWord)
+	if cleanWord == "" || len(cleanWord) > 60 {
+		return nil, fmt.Errorf("invalid word")
 	}
 
-	return &entry, nil
+	// 1. Check local SQLite cache (instant & offline)
+	cachedJSON, err := a.store.GetCachedDefinition(cleanWord)
+	if err == nil && cachedJSON != "" {
+		var entry DictionaryEntry
+		if jsonErr := json.Unmarshal([]byte(cachedJSON), &entry); jsonErr == nil {
+			entry.Cached = true
+			return &entry, nil
+		}
+	}
+
+	// 2. Query Wiktionary REST API (fast, high uptime, Wikimedia CDN)
+	entry, err := lookupWiktionary(cleanWord)
+	if err != nil {
+		// 3. Fallback to Free Dictionary API if Wiktionary did not return definitions
+		fallbackEntry, fbErr := lookupFreeDictionaryAPI(cleanWord)
+		if fbErr == nil && fallbackEntry != nil {
+			entry = fallbackEntry
+		} else {
+			return nil, fmt.Errorf("no definition found for '%s'. Check your spelling or internet connection", cleanWord)
+		}
+	}
+
+	// 4. Persist to SQLite cache for offline availability
+	if entry != nil {
+		if encoded, err := json.Marshal(entry); err == nil {
+			_ = a.store.SaveCachedDefinition(cleanWord, string(encoded))
+		}
+	}
+
+	return entry, nil
 }
 
