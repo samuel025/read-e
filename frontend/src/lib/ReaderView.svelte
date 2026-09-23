@@ -97,11 +97,22 @@
 </div>
 
 <style>
+  @keyframes readerFadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
   .reader-view {
     height: 100vh;
     display: flex;
     flex-direction: column;
     background: var(--bg-primary);
+    animation: readerFadeIn 160ms var(--ease-out) forwards;
+    will-change: opacity;
   }
 
   .reader-body {

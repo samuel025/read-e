@@ -278,8 +278,8 @@
       </div>
     {:else}
       <div class="book-grid">
-        {#each filteredBooks as book, i (book.id)}
-          <div class="stagger-item" style="animation-delay: {Math.min(i * 50, 500)}ms">
+        {#each filteredBooks as book (book.id)}
+          <div class="stagger-item">
             <BookCard
               {book}
               on:remove={handleRemoveBook}
@@ -297,11 +297,24 @@
 {/if}
 
 <style>
+  @keyframes viewFadeIn {
+    from {
+      opacity: 0;
+      transform: scale(0.995);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
   .library-view {
     height: 100vh;
     display: flex;
     flex-direction: column;
     background: var(--bg-primary);
+    animation: viewFadeIn 160ms var(--ease-out) forwards;
+    will-change: opacity, transform;
   }
 
   .library-header {
@@ -371,15 +384,17 @@
     font-size: 0.8125rem;
     font-family: var(--font-sans);
     color: var(--fg-primary);
-    width: 200px;
-    transition: border-color var(--duration-normal) var(--ease-out),
-                width var(--duration-normal) var(--ease-out);
+    width: 220px;
+    transition: border-color var(--duration-fast) var(--ease-out),
+                background var(--duration-fast) var(--ease-out),
+                box-shadow var(--duration-fast) var(--ease-out);
   }
 
   .search-input:focus {
     outline: none;
     border-color: var(--accent);
-    width: 260px;
+    background: var(--bg-secondary);
+    box-shadow: 0 0 0 2px var(--accent-subtle);
   }
 
   .search-input::placeholder {

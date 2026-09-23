@@ -10,8 +10,6 @@
 
   const dispatch = createEventDispatcher();
 
-  let hovering = false;
-
   async function handleOpen() {
     currentBookId.set(book.id);
 
@@ -72,11 +70,8 @@
 
 <button
   class="book-card"
-  class:hovering
   class:is-finished={book.finished}
   on:click={handleOpen}
-  on:mouseenter={() => (hovering = true)}
-  on:mouseleave={() => (hovering = false)}
   id="book-{book.id}"
 >
   <div class="cover-wrapper">
@@ -130,11 +125,10 @@
     {/if}
 
     <!-- Card Action Buttons (Finish toggle + Remove) -->
-    <div class="card-actions" class:visible={hovering || book.finished}>
+    <div class="card-actions">
       <button
         class="action-btn finish-btn"
         class:is-finished={book.finished}
-        class:visible={hovering || book.finished}
         on:click={handleToggleFinished}
         title={book.finished ? "Mark as in progress" : "Mark as finished"}
       >
@@ -145,7 +139,6 @@
 
       <button
         class="action-btn remove-btn"
-        class:visible={hovering}
         on:click={handleRemove}
         title="Remove from library"
       >
@@ -182,12 +175,13 @@
     text-align: left;
     padding: 0;
     font-family: var(--font-sans);
-    transition: transform var(--duration-normal) var(--ease-out);
+    transition: transform var(--duration-fast) var(--ease-out);
     width: 100%;
   }
 
   .book-card:active {
-    transform: scale(0.97);
+    transform: scale(0.98);
+    transition-duration: 80ms;
   }
 
   .cover-wrapper {
@@ -196,15 +190,38 @@
     aspect-ratio: 2 / 3;
     border-radius: var(--radius-md);
     overflow: hidden;
-    /* Layered shadow — not flat border */
     box-shadow: var(--shadow-md);
-    transition: box-shadow var(--duration-normal) var(--ease-out),
-                transform var(--duration-normal) var(--ease-out);
+    transform: translateZ(0);
+    will-change: transform;
+    transition: transform var(--duration-normal) var(--ease-out);
   }
 
-  .book-card:hover .cover-wrapper {
+  /* GPU-accelerated shadow elevation — animate opacity instead of box-shadow repaint */
+  .cover-wrapper::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
     box-shadow: var(--shadow-xl);
-    transform: translateY(-4px);
+    opacity: 0;
+    transition: opacity var(--duration-normal) var(--ease-out);
+    pointer-events: none;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .book-card:hover .cover-wrapper {
+      transform: translateY(-4px) translateZ(0);
+    }
+
+    .book-card:hover .cover-wrapper::after {
+      opacity: 1;
+    }
+
+    .book-card:hover .action-btn {
+      opacity: 1;
+      pointer-events: auto;
+      transform: scale(1);
+    }
   }
 
   .cover-img {
@@ -321,17 +338,11 @@
     cursor: pointer;
     opacity: 0;
     pointer-events: none;
-    transform: scale(0.9);
-    transition: opacity var(--duration-normal) var(--ease-out),
-                transform var(--duration-normal) var(--ease-out),
-                background var(--duration-normal) var(--ease-out),
-                box-shadow var(--duration-normal) var(--ease-out);
-  }
-
-  .action-btn.visible {
-    opacity: 1;
-    pointer-events: auto;
-    transform: scale(1);
+    transform: scale(0.92);
+    transition: opacity var(--duration-fast) var(--ease-out),
+                transform var(--duration-fast) var(--ease-out),
+                background var(--duration-fast) var(--ease-out);
+    will-change: opacity, transform;
   }
 
   .finish-btn:hover {
