@@ -12,6 +12,27 @@ All data, including book metadata, reading progress, highlights, notes, and book
 
 ---
 
+## Download
+
+Ready-to-use binaries for Linux x86_64 are available on [GitHub Releases](https://github.com/samuel025/read-e/releases/latest):
+
+| Package | Platform | Direct Download |
+| --- | --- | --- |
+| **AppImage** (Recommended) | Universal (Ubuntu, Fedora, Arch, Mint, openSUSE, Debian, etc.) | [📥 `read-e_1.0.0_x86_64.AppImage`](https://github.com/samuel025/read-e/releases/latest/download/read-e_1.0.0_x86_64.AppImage) |
+| **Debian Package** | Ubuntu, Debian, Pop!_OS, Linux Mint | [📥 `read-e_1.0.0_amd64.deb`](https://github.com/samuel025/read-e/releases/latest/download/read-e_1.0.0_amd64.deb) |
+
+#### Quick Start:
+```bash
+# 1. Run portable AppImage (no install needed)
+chmod +x read-e_1.0.0_x86_64.AppImage
+./read-e_1.0.0_x86_64.AppImage
+
+# 2. Or install .deb package on Debian/Ubuntu
+sudo dpkg -i read-e_1.0.0_amd64.deb
+```
+
+---
+
 ## Key Features
 
 ### Document Support
