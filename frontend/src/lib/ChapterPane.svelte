@@ -1324,6 +1324,61 @@
             }, '*');
           }
 
+          function findHashTarget(rawHash) {
+            if (!rawHash) return null;
+            var candidates = [rawHash];
+            try {
+              var decoded = decodeURIComponent(rawHash);
+              if (decoded && decoded !== rawHash) candidates.push(decoded);
+            } catch(err) {}
+            try {
+              var unescaped = unescape(rawHash);
+              if (unescaped && unescaped !== rawHash && candidates.indexOf(unescaped) === -1) candidates.push(unescaped);
+            } catch(err) {}
+
+            for (var i = 0; i < candidates.length; i++) {
+              var h = candidates[i];
+              var el = document.getElementById(h);
+              if (el) return el;
+
+              try {
+                el = document.querySelector('[name="' + CSS.escape(h) + '"]');
+                if (el) return el;
+              } catch(err) {}
+
+              try {
+                el = document.querySelector('#' + CSS.escape(h));
+                if (el) return el;
+              } catch(err) {}
+
+              try {
+                el = document.querySelector('[id*="' + CSS.escape(h) + '"]') || document.querySelector('[name*="' + CSS.escape(h) + '"]');
+                if (el) return el;
+              } catch(err) {}
+            }
+            return null;
+          }
+
+          function scrollToHashWithRetry(hash, attempts) {
+            attempts = attempts || 0;
+            var target = findHashTarget(hash);
+            if (target) {
+              target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              target.classList.remove('reader-target-highlight');
+              void target.offsetWidth;
+              target.classList.add('reader-target-highlight');
+              setTimeout(function() {
+                target.classList.remove('reader-target-highlight');
+              }, 1800);
+              return;
+            }
+            if (attempts < 6) {
+              setTimeout(function() {
+                scrollToHashWithRetry(hash, attempts + 1);
+              }, 80);
+            }
+          }
+
           // Listen for commands from parent window
           window.addEventListener('message', function(e) {
             if (!e.data || !e.data.type) return;
@@ -1335,18 +1390,8 @@
             } else if (e.data.type === 'scroll-to-offset') {
               scrollToOffsetWithRetry(e.data.offset, 0);
             } else if (e.data.type === 'scroll-to-hash') {
-              var hash = e.data.hash;
-              if (hash) {
-                var target = document.getElementById(hash) || document.querySelector('[name="' + CSS.escape(hash) + '"]') || document.querySelector('#' + CSS.escape(hash));
-                if (target) {
-                  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                  target.classList.remove('reader-target-highlight');
-                  void target.offsetWidth;
-                  target.classList.add('reader-target-highlight');
-                  setTimeout(function() {
-                    target.classList.remove('reader-target-highlight');
-                  }, 1800);
-                }
+              if (e.data.hash) {
+                scrollToHashWithRetry(e.data.hash, 0);
               }
             } else if (e.data.type === 'scroll-to-top') {
               window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1479,19 +1524,60 @@
   }
 
   let pendingHash = null;
+  let isNavigatingToStart = false;
+
+  async function handleNavigateTo(e) {
+    const { spineIndex, hash } = e.detail || {};
+    if (typeof spineIndex !== 'number' || isNaN(spineIndex)) return;
+    if (spineIndex < 0 || spineIndex >= $spineCount) return;
+
+    if ($currentSpineIndex === spineIndex) {
+      if (hash) {
+        if (iframeEl?.contentWindow) {
+          iframeEl.contentWindow.postMessage({ type: 'scroll-to-hash', hash }, '*');
+        }
+      } else {
+        if (iframeEl?.contentWindow) {
+          iframeEl.contentWindow.scrollTo({ top: 0, behavior: 'smooth' });
+          iframeEl.contentWindow.postMessage({ type: 'scroll-to-top' }, '*');
+        }
+        if ($currentBookId) {
+          saveProgress($currentBookId, spineIndex, 0);
+        }
+      }
+      return;
+    }
+
+    loading = true;
+    pendingHash = hash || null;
+    isNavigatingToStart = !hash;
+    currentSpineIndex.set(spineIndex);
+
+    try {
+      const html = await getChapter($currentBookId, spineIndex);
+      currentChapter.set(html);
+      if (!hash && $currentBookId) {
+        saveProgress($currentBookId, spineIndex, 0);
+      }
+    } catch (err) {
+      console.error('Failed to load chapter on navigate:', err);
+    } finally {
+      loading = false;
+    }
+  }
 
   function handleScrollToHash(e) {
     const hash = e.detail?.hash;
     if (!hash) return;
+    pendingHash = hash;
     if (iframeEl?.contentWindow) {
       iframeEl.contentWindow.postMessage({ type: 'scroll-to-hash', hash }, '*');
-    } else {
-      pendingHash = hash;
     }
   }
 
   function handleScrollToTop() {
     if (iframeEl?.contentWindow) {
+      iframeEl.contentWindow.scrollTo({ top: 0, behavior: 'smooth' });
       iframeEl.contentWindow.postMessage({ type: 'scroll-to-top' }, '*');
     }
   }
@@ -1501,11 +1587,13 @@
     window.addEventListener('message', handleWindowMessage);
     window.addEventListener('epub-scroll-to-hash', handleScrollToHash);
     window.addEventListener('epub-scroll-to-top', handleScrollToTop);
+    window.addEventListener('epub-navigate-to', handleNavigateTo);
     return () => {
       window.removeEventListener('keydown', handleKeydown);
       window.removeEventListener('message', handleWindowMessage);
       window.removeEventListener('epub-scroll-to-hash', handleScrollToHash);
       window.removeEventListener('epub-scroll-to-top', handleScrollToTop);
+      window.removeEventListener('epub-navigate-to', handleNavigateTo);
     };
   });
 
@@ -1589,16 +1677,24 @@
     if (pendingHash) {
       const h = pendingHash;
       pendingHash = null;
+      isNavigatingToStart = false;
       setTimeout(() => {
         iframeEl?.contentWindow?.postMessage({ type: 'scroll-to-hash', hash: h }, '*');
-        setTimeout(queuePageCalculation, 150);
-      }, 100);
+        setTimeout(queuePageCalculation, 120);
+      }, 60);
+    } else if (isNavigatingToStart) {
+      isNavigatingToStart = false;
+      iframeEl.contentWindow.scrollTo(0, 0);
+      iframeEl.contentWindow.postMessage({ type: 'scroll-to-top' }, '*');
+      setTimeout(queuePageCalculation, 60);
     } else {
       getProgress($currentBookId).then((pos) => {
         if (pos && pos.spineIndex === $currentSpineIndex && pos.scrollOffset && iframeEl?.contentWindow) {
           iframeEl.contentWindow.scrollTo(0, pos.scrollOffset);
-          setTimeout(queuePageCalculation, 100);
+        } else if (iframeEl?.contentWindow) {
+          iframeEl.contentWindow.scrollTo(0, 0);
         }
+        setTimeout(queuePageCalculation, 100);
       });
     }
 

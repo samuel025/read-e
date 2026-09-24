@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ type Reader struct {
 	opfDir       string
 	manifest     map[string]ManifestItem
 	spine        []SpineItem
+	spineTocID   string
 	meta         BookInfo
 	toc          []TOCEntry
 	chapterWords []int
@@ -265,6 +267,7 @@ func (r *Reader) parseOPF(opfPath string) error {
 			})
 		}
 	}
+	r.spineTocID = pkg.Spine.Toc
 	r.meta.SpineCount = len(r.spine)
 	r.meta.CoverBase64 = r.CoverImage()
 
@@ -302,26 +305,51 @@ func (r *Reader) findCoverID() string {
 }
 
 func (r *Reader) parseTOC() {
+	// 1. EPUB 3 Navigation Document
 	for _, item := range r.manifest {
 		if strings.Contains(item.Properties, "nav") {
-			toc, err := r.parseNav(r.resolvePath(item.Href))
+			navPath := r.resolvePath(item.Href)
+			toc, err := r.parseNav(navPath)
 			if err == nil && len(toc) > 0 {
 				r.toc = toc
-				r.resolveSpineIndices()
+				r.resolveSpineIndices(navPath)
 				return
 			}
 		}
 	}
 
+	// 2. EPUB 2 NCX by MediaType
 	for _, item := range r.manifest {
 		if item.MediaType == "application/x-dtbncx+xml" {
-			toc, err := r.parseNCX(r.resolvePath(item.Href))
+			ncxPath := r.resolvePath(item.Href)
+			toc, err := r.parseNCX(ncxPath)
 			if err == nil && len(toc) > 0 {
 				r.toc = toc
-				r.resolveSpineIndices()
+				r.resolveSpineIndices(ncxPath)
 				return
 			}
 		}
+	}
+
+	// 3. EPUB 2 NCX by Spine.Toc ID
+	if r.spineTocID != "" {
+		if item, ok := r.manifest[r.spineTocID]; ok {
+			ncxPath := r.resolvePath(item.Href)
+			toc, err := r.parseNCX(ncxPath)
+			if err == nil && len(toc) > 0 {
+				r.toc = toc
+				r.resolveSpineIndices(ncxPath)
+				return
+			}
+		}
+	}
+
+	// 4. Fallback to standard toc.ncx location
+	fallbackNCX := r.resolvePath("toc.ncx")
+	if toc, err := r.parseNCX(fallbackNCX); err == nil && len(toc) > 0 {
+		r.toc = toc
+		r.resolveSpineIndices(fallbackNCX)
+		return
 	}
 }
 
@@ -419,30 +447,110 @@ func (r *Reader) convertNCXPoints(points []ncxNavPoint) []TOCEntry {
 	return entries
 }
 
-func (r *Reader) resolveSpineIndices() {
-	hrefToIndex := make(map[string]int)
+func (r *Reader) resolveSpineIndices(tocFilePath string) {
+	exactHrefToIndex := make(map[string]int)
+	cleanZipPathToIndex := make(map[string]int)
+	lowerZipPathToIndex := make(map[string]int)
+	baseNameToIndex := make(map[string]int)
+	baseNameCount := make(map[string]int)
+
 	for i, s := range r.spine {
-		href := s.Href
-		if idx := strings.Index(href, "#"); idx != -1 {
-			href = href[:idx]
+		cleanHref := s.Href
+		if idx := strings.Index(cleanHref, "#"); idx != -1 {
+			cleanHref = cleanHref[:idx]
 		}
-		hrefToIndex[href] = i
+		if unescaped, err := url.PathUnescape(cleanHref); err == nil {
+			cleanHref = unescaped
+		}
+		cleanHref = strings.TrimPrefix(path.Clean(cleanHref), "/")
+		exactHrefToIndex[cleanHref] = i
+
+		zipPath := strings.TrimPrefix(path.Clean(r.resolvePath(cleanHref)), "/")
+		cleanZipPathToIndex[zipPath] = i
+		lowerZipPathToIndex[strings.ToLower(zipPath)] = i
+
+		base := strings.ToLower(path.Base(cleanHref))
+		baseNameToIndex[base] = i
+		baseNameCount[base]++
 	}
 
-	r.resolveIndicesRecursive(r.toc, hrefToIndex)
+	tocDir := path.Dir(tocFilePath)
+	r.resolveIndicesRecursive(r.toc, exactHrefToIndex, cleanZipPathToIndex, lowerZipPathToIndex, baseNameToIndex, baseNameCount, tocDir, 0)
 }
 
-func (r *Reader) resolveIndicesRecursive(entries []TOCEntry, hrefToIndex map[string]int) {
+func (r *Reader) resolveIndicesRecursive(
+	entries []TOCEntry,
+	exactHrefToIndex map[string]int,
+	cleanZipPathToIndex map[string]int,
+	lowerZipPathToIndex map[string]int,
+	baseNameToIndex map[string]int,
+	baseNameCount map[string]int,
+	tocDir string,
+	fallbackSpineIndex int,
+) {
+	currentFallback := fallbackSpineIndex
 	for i := range entries {
-		href := entries[i].Href
-		if idx := strings.Index(href, "#"); idx != -1 {
-			href = href[:idx]
+		rawHref := entries[i].Href
+		cleanHref := rawHref
+		if idx := strings.Index(cleanHref, "#"); idx != -1 {
+			cleanHref = cleanHref[:idx]
 		}
-		if idx, ok := hrefToIndex[href]; ok {
-			entries[i].SpineIndex = idx
+		if unescaped, err := url.PathUnescape(cleanHref); err == nil {
+			cleanHref = unescaped
 		}
+		cleanHref = strings.TrimPrefix(path.Clean(cleanHref), "/")
+
+		resolvedIndex := -1
+
+		// 1. If cleanHref is empty or ".", it's an intra-document anchor; use parent/fallback spine index
+		if cleanHref == "" || cleanHref == "." {
+			resolvedIndex = currentFallback
+		} else {
+			// 2. Exact match against spine item Href
+			if idx, ok := exactHrefToIndex[cleanHref]; ok {
+				resolvedIndex = idx
+			} else if idx, ok := cleanZipPathToIndex[strings.TrimPrefix(path.Clean(path.Join(tocDir, cleanHref)), "/")]; ok {
+				// 3. Relative to TOC file directory (standard for EPUB nav & ncx)
+				resolvedIndex = idx
+			} else if idx, ok := cleanZipPathToIndex[strings.TrimPrefix(path.Clean(r.resolvePath(cleanHref)), "/")]; ok {
+				// 4. Relative to OPF directory
+				resolvedIndex = idx
+			} else if idx, ok := cleanZipPathToIndex[cleanHref]; ok {
+				// 5. Direct zip archive path
+				resolvedIndex = idx
+			} else if idx, ok := lowerZipPathToIndex[strings.ToLower(strings.TrimPrefix(path.Clean(path.Join(tocDir, cleanHref)), "/"))]; ok {
+				// 6. Case-insensitive relative to TOC dir
+				resolvedIndex = idx
+			} else if idx, ok := lowerZipPathToIndex[strings.ToLower(strings.TrimPrefix(path.Clean(r.resolvePath(cleanHref)), "/"))]; ok {
+				// 7. Case-insensitive relative to OPF dir
+				resolvedIndex = idx
+			} else if idx, ok := lowerZipPathToIndex[strings.ToLower(cleanHref)]; ok {
+				// 8. Case-insensitive direct zip path
+				resolvedIndex = idx
+			} else if count, ok := baseNameCount[strings.ToLower(path.Base(cleanHref))]; ok && count == 1 {
+				// 9. Base filename match if unique across spine items
+				resolvedIndex = baseNameToIndex[strings.ToLower(path.Base(cleanHref))]
+			}
+		}
+
+		if resolvedIndex >= 0 {
+			entries[i].SpineIndex = resolvedIndex
+			currentFallback = resolvedIndex
+		} else {
+			entries[i].SpineIndex = currentFallback
+		}
+
 		if len(entries[i].Children) > 0 {
-			r.resolveIndicesRecursive(entries[i].Children, hrefToIndex)
+			r.resolveIndicesRecursive(
+				entries[i].Children,
+				exactHrefToIndex,
+				cleanZipPathToIndex,
+				lowerZipPathToIndex,
+				baseNameToIndex,
+				baseNameCount,
+				tocDir,
+				entries[i].SpineIndex,
+			)
 		}
 	}
 }

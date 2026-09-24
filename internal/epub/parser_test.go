@@ -223,3 +223,108 @@ func TestInvalidEPUB(t *testing.T) {
 		t.Fatalf("expected error opening non-zip file, got nil")
 	}
 }
+
+func TestTOCSpineResolutionComplex(t *testing.T) {
+	tmpDir := t.TempDir()
+	epubFile := filepath.Join(tmpDir, "multichapter.epub")
+
+	f, err := os.Create(epubFile)
+	if err != nil {
+		t.Fatalf("failed to create epub: %v", err)
+	}
+	defer f.Close()
+
+	zw := zip.NewWriter(f)
+
+	// mimetype
+	zf, _ := zw.CreateHeader(&zip.FileHeader{Name: "mimetype", Method: zip.Store})
+	zf.Write([]byte("application/epub+zip"))
+
+	// container.xml
+	zf, _ = zw.Create("META-INF/container.xml")
+	zf.Write([]byte(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`))
+
+	// content.opf
+	zf, _ = zw.Create("OEBPS/content.opf")
+	zf.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" unique-identifier="pub-id" xmlns="http://www.idpf.org/2007/opf">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Multi</dc:title></metadata>
+  <manifest>
+    <item id="c0" href="text/intro.xhtml" media-type="application/xhtml+xml"/>
+    <item id="c1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="c2" href="text/Chapter%202.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ncx" href="toc/nav.ncx" media-type="application/x-dtbncx+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="c0"/>
+    <itemref idref="c1"/>
+    <itemref idref="c2"/>
+  </spine>
+</package>`))
+
+	// Chapters
+	zf, _ = zw.Create("OEBPS/text/intro.xhtml")
+	zf.Write([]byte(`<html><body>Intro</body></html>`))
+	zf, _ = zw.Create("OEBPS/text/ch1.xhtml")
+	zf.Write([]byte(`<html><body>Chapter 1</body></html>`))
+	zf, _ = zw.Create("OEBPS/text/Chapter 2.xhtml")
+	zf.Write([]byte(`<html><body>Chapter 2</body></html>`))
+
+	// TOC NCX located in OEBPS/toc/nav.ncx with relative paths like ../text/ch1.xhtml, #anchor, etc.
+	zf, _ = zw.Create("OEBPS/toc/nav.ncx")
+	zf.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<ncx version="2005-1" xmlns="http://www.daisy.org/z3986/2005/ncx/">
+  <navMap>
+    <navPoint id="np0" playOrder="1">
+      <navLabel><text>Intro</text></navLabel>
+      <content src="../text/intro.xhtml"/>
+    </navPoint>
+    <navPoint id="np1" playOrder="2">
+      <navLabel><text>Chapter 1</text></navLabel>
+      <content src="../text/ch1.xhtml#section1"/>
+      <navPoint id="np1-sub" playOrder="3">
+        <navLabel><text>Chapter 1 Sub</text></navLabel>
+        <content src="#subpart"/>
+      </navPoint>
+    </navPoint>
+    <navPoint id="np2" playOrder="4">
+      <navLabel><text>Chapter 2 Encoded</text></navLabel>
+      <content src="../text/Chapter%202.xhtml"/>
+    </navPoint>
+  </navMap>
+</ncx>`))
+
+	zw.Close()
+
+	reader, err := epub.Open(epubFile)
+	if err != nil {
+		t.Fatalf("failed to open epub: %v", err)
+	}
+	defer reader.Close()
+
+	toc := reader.TOC()
+	if len(toc) != 3 {
+		t.Fatalf("expected 3 top-level TOC entries, got %d", len(toc))
+	}
+
+	// Intro -> spineIndex 0
+	if toc[0].SpineIndex != 0 {
+		t.Errorf("expected Intro spine index 0, got %d", toc[0].SpineIndex)
+	}
+
+	// Chapter 1 -> spineIndex 1
+	if toc[1].SpineIndex != 1 {
+		t.Errorf("expected Chapter 1 spine index 1, got %d", toc[1].SpineIndex)
+	}
+
+	// Chapter 1 Sub -> spineIndex 1 (inherited because intra-document anchor #subpart)
+	if len(toc[1].Children) != 1 || toc[1].Children[0].SpineIndex != 1 {
+		t.Errorf("expected Chapter 1 Sub spine index 1, got %+v", toc[1].Children)
+	}
+
+	// Chapter 2 Encoded -> spineIndex 2
+	if toc[2].SpineIndex != 2 {
+		t.Errorf("expected Chapter 2 spine index 2, got %d", toc[2].SpineIndex)
+	}
+}
+

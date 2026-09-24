@@ -1128,9 +1128,10 @@
 
   async function handleScrollToTocEvent(e) {
     const { pageIndex, title } = e.detail || {};
-    if (pageIndex === undefined) return;
+    if (pageIndex === undefined || pageIndex === null || isNaN(pageIndex)) return;
 
-    scrollToPage(pageIndex + 1);
+    const targetPage = Math.max(1, Math.min(pageIndex + 1, numPages || (pageIndex + 1)));
+    scrollToPage(targetPage);
 
     if (title) {
       const cleanTitle = title.replace(/^[0-9.]+\s*/, '').trim().toLowerCase();

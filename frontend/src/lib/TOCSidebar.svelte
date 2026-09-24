@@ -1,9 +1,9 @@
 <script>
   import {
-    toc, currentSpineIndex, currentBookId, currentBook, currentChapter,
+    toc, currentSpineIndex, currentBookId, currentBook,
     activeSidebarTab, highlights, bookmarks
   } from '../stores/app.js';
-  import { getChapter, saveProgress, getHighlights, getBookmarks } from './api.js';
+  import { getHighlights, getBookmarks } from './api.js';
   import HighlightsSidebar from './HighlightsSidebar.svelte';
   import BookmarksSidebar from './BookmarksSidebar.svelte';
 
@@ -59,7 +59,7 @@
     if (!bookId || !entry) return;
 
     selectedKey = getEntryKey(entry);
-    const spineIndex = entry.spineIndex;
+    const spineIndex = typeof entry.spineIndex === 'number' ? entry.spineIndex : 0;
 
     if ($currentBook?.format === 'pdf') {
       window.dispatchEvent(new CustomEvent('pdf-scroll-to-toc', {
@@ -74,30 +74,12 @@
 
     const hash = entry.href && entry.href.includes('#') ? entry.href.split('#')[1] : null;
 
-    if ($currentSpineIndex === spineIndex) {
-      if (hash) {
-        window.dispatchEvent(new CustomEvent('epub-scroll-to-hash', {
-          detail: { hash }
-        }));
-      } else {
-        window.dispatchEvent(new CustomEvent('epub-scroll-to-top'));
+    window.dispatchEvent(new CustomEvent('epub-navigate-to', {
+      detail: {
+        spineIndex,
+        hash
       }
-      return;
-    }
-
-    currentSpineIndex.set(spineIndex);
-    const html = await getChapter(bookId, spineIndex);
-    currentChapter.set(html);
-
-    if (hash) {
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('epub-scroll-to-hash', {
-          detail: { hash }
-        }));
-      }, 150);
-    } else {
-      saveProgress(bookId, spineIndex, 0);
-    }
+    }));
   }
 
   $: if ($currentBookId) {
