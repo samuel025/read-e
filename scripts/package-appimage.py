@@ -17,7 +17,13 @@ DIST_DIR = os.path.join(ROOT_DIR, "dist")
 APPDIR = os.path.join(DIST_DIR, "AppDir")
 TOOL_PATH = os.path.join(DIST_DIR, "appimagetool-x86_64.AppImage")
 
-VERSION = "1.0.0"
+VERSION_FILE = os.path.join(ROOT_DIR, "VERSION")
+if os.path.isfile(VERSION_FILE):
+    with open(VERSION_FILE, "r") as f:
+        VERSION = f.read().strip()
+else:
+    VERSION = "1.0.1"
+
 ARCH = "x86_64"
 APPIMAGE_NAME = f"read-e_{VERSION}_{ARCH}.AppImage"
 APPIMAGE_OUT = os.path.join(DIST_DIR, APPIMAGE_NAME)

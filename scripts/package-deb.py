@@ -14,7 +14,13 @@ SVG_ICON = os.path.join(ROOT_DIR, "build", "appicon.svg")
 DIST_DIR = os.path.join(ROOT_DIR, "dist")
 PKG_DIR = os.path.join(DIST_DIR, "deb-pkg")
 
-VERSION = "1.0.0"
+VERSION_FILE = os.path.join(ROOT_DIR, "VERSION")
+if os.path.isfile(VERSION_FILE):
+    with open(VERSION_FILE, "r") as f:
+        VERSION = f.read().strip()
+else:
+    VERSION = "1.0.1"
+
 ARCH = "amd64"
 DEB_NAME = f"read-e_{VERSION}_{ARCH}.deb"
 DEB_PATH = os.path.join(DIST_DIR, DEB_NAME)
