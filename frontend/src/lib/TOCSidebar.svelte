@@ -62,6 +62,8 @@
     selectedKey = getEntryKey(entry);
     const spineIndex = (typeof entry.spineIndex === 'number' && !isNaN(entry.spineIndex)) ? entry.spineIndex : 0;
 
+    console.log(`[TOC] navigateTo: "${entry.title}" spineIndex=${spineIndex}, href=${entry.href}, currentSpine=${$currentSpineIndex}`);
+
     if ($currentBook?.format === 'pdf') {
       window.dispatchEvent(new CustomEvent('pdf-scroll-to-toc', {
         detail: {
@@ -79,6 +81,7 @@
       hash = raw.split('?')[0].split('&')[0];
     }
 
+    console.log(`[TOC] dispatching epub-navigate-to: spineIndex=${spineIndex}, hash=${hash}`);
     window.dispatchEvent(new CustomEvent('epub-navigate-to', {
       detail: {
         spineIndex,

@@ -64,10 +64,13 @@
     });
   }
 
+  let navigationGeneration = 0;
+  let handledNavigationGeneration = -1;
+
   $: themeCSS = buildThemeCSS($settings);
 
   // NOTE: srcdoc does NOT depend on $highlights so highlighting does not reload the iframe!
-  $: srcdoc = buildSrcdoc($currentChapter, themeCSS, $currentBookId, $currentSpineIndex);
+  $: srcdoc = buildSrcdoc($currentChapter, themeCSS, $currentBookId, $currentSpineIndex, navigationGeneration);
 
   // Synchronize highlights to iframe whenever $highlights changes
   $: if (iframeEl?.contentWindow && $currentBookId) {
@@ -523,7 +526,7 @@
     `;
   }
 
-  function buildSrcdoc(chapter, css, bookId, spineIndex) {
+  function buildSrcdoc(chapter, css, bookId, spineIndex, navGen) {
     if (!chapter) return '';
 
     const script = `
@@ -531,6 +534,7 @@
         (function() {
           var bookId = ${JSON.stringify(bookId || '')};
           var spineIndex = ${spineIndex || 0};
+          var navGen = ${navGen || 0};
           var existingHighlights = [];
 
           var activeMenu = null;
@@ -1410,6 +1414,7 @@
             attempts = attempts || 0;
             var target = findHashTarget(hash);
             if (target) {
+              window.parent.postMessage({ type: '_debug', msg: '[IFRAME] scrollToHash found: ' + hash + ' tag=' + target.tagName + ' id=' + target.id + ' attempt=' + attempts }, '*');
               scrollElementIntoView(target);
               setTimeout(function() {
                 var t = findHashTarget(hash);
@@ -1423,9 +1428,14 @@
               return;
             }
             if (attempts < 15) {
+              if (attempts === 0) {
+                window.parent.postMessage({ type: '_debug', msg: '[IFRAME] scrollToHash NOT found yet: ' + hash + ', retrying...' }, '*');
+              }
               setTimeout(function() {
                 scrollToHashWithRetry(hash, attempts + 1);
               }, 80);
+            } else {
+              window.parent.postMessage({ type: '_debug', msg: '[IFRAME] scrollToHash FAILED after 15 attempts: ' + hash }, '*');
             }
           }
 
@@ -1529,6 +1539,64 @@
   function handleWindowMessage(e) {
     if (!e.data || !e.data.type) return;
 
+    if (e.data.type === 'iframe-ready') {
+      console.log(`[IFRAME_READY] navGen=${e.data.navGen}, spineIndex=${e.data.spineIndex}, currentSpineIndex=${$currentSpineIndex}, pendingHash=${pendingHash}`);
+      
+      if (e.data.navGen !== handledNavigationGeneration) {
+        handledNavigationGeneration = e.data.navGen;
+        if (pendingHash) {
+          const h = pendingHash;
+          pendingHash = null;
+          isNavigatingToStart = false;
+          console.log(`[IFRAME_READY] scrolling to hash: ${h}`);
+          setTimeout(() => {
+            iframeEl?.contentWindow?.postMessage({ type: 'scroll-to-hash', hash: h }, '*');
+            setTimeout(queuePageCalculation, 120);
+          }, 50);
+        } else if (isNavigatingToStart) {
+          isNavigatingToStart = false;
+          console.log('[IFRAME_READY] scrolling to top (new chapter)');
+          iframeEl?.contentWindow?.postMessage({ type: 'scroll-to-top' }, '*');
+          setTimeout(queuePageCalculation, 60);
+        } else {
+          console.log('[IFRAME_READY] restoring saved progress');
+          getProgress($currentBookId).then((pos) => {
+            if (pos && pos.spineIndex === $currentSpineIndex && pos.scrollOffset && iframeEl?.contentWindow) {
+              iframeEl.contentWindow.postMessage({ type: 'scroll-to-offset', offset: pos.scrollOffset }, '*');
+            } else if (iframeEl?.contentWindow) {
+              iframeEl.contentWindow.postMessage({ type: 'scroll-to-top' }, '*');
+            }
+            setTimeout(queuePageCalculation, 100);
+          });
+        }
+      } else {
+        // Theme change or reload: just restore progress
+        console.log('[IFRAME_READY] generation already handled, restoring saved progress');
+        getProgress($currentBookId).then((pos) => {
+          if (pos && pos.spineIndex === $currentSpineIndex && pos.scrollOffset && iframeEl?.contentWindow) {
+            iframeEl.contentWindow.postMessage({ type: 'scroll-to-offset', offset: pos.scrollOffset }, '*');
+          } else if (iframeEl?.contentWindow) {
+            iframeEl.contentWindow.postMessage({ type: 'scroll-to-top' }, '*');
+          }
+          setTimeout(queuePageCalculation, 100);
+        });
+      }
+
+      if ($currentBookId) {
+        const chHighlights = $highlights.filter(h => h.bookId === $currentBookId && h.spineIndex === $currentSpineIndex);
+        iframeEl?.contentWindow?.postMessage({
+          type: 'sync-highlights',
+          highlights: chHighlights
+        }, '*');
+      }
+      return;
+    }
+
+    if (e.data.type === '_debug') {
+      console.log(e.data.msg);
+      return;
+    }
+
     if (e.data.type === 'create-highlight') {
       const h = e.data.highlight;
       addHighlight(h);
@@ -1578,15 +1646,29 @@
   let pendingHash = null;
   let isNavigatingToStart = false;
 
+  let _navId = 0;
+
   async function handleNavigateTo(e) {
     const { spineIndex, hash } = e.detail || {};
-    if (typeof spineIndex !== 'number' || isNaN(spineIndex)) return;
-    if (spineIndex < 0 || ($spineCount > 0 && spineIndex >= $spineCount)) return;
+    const navId = ++_navId;
+    console.log(`[NAV ${navId}] handleNavigateTo called: spineIndex=${spineIndex}, hash=${hash}, currentSpine=${$currentSpineIndex}, spineCount=${$spineCount}, loading=${loading}`);
+
+    if (typeof spineIndex !== 'number' || isNaN(spineIndex)) {
+      console.log(`[NAV ${navId}] REJECTED: spineIndex not a number`);
+      return;
+    }
+    if (spineIndex < 0 || ($spineCount > 0 && spineIndex >= $spineCount)) {
+      console.log(`[NAV ${navId}] REJECTED: out of range (spineIndex=${spineIndex}, spineCount=${$spineCount})`);
+      return;
+    }
 
     if ($currentSpineIndex === spineIndex) {
+      console.log(`[NAV ${navId}] SAME SPINE path: sending postMessage (hash=${hash}, hasIframe=${!!iframeEl?.contentWindow})`);
       if (hash) {
         if (iframeEl?.contentWindow) {
           iframeEl.contentWindow.postMessage({ type: 'scroll-to-hash', hash }, '*');
+        } else {
+          console.warn(`[NAV ${navId}] NO IFRAME contentWindow for hash scroll!`);
         }
       } else {
         if (iframeEl?.contentWindow) {
@@ -1600,18 +1682,27 @@
     }
 
     loading = true;
-    pendingHash = hash || null;
-    isNavigatingToStart = !hash;
+    console.log(`[NAV ${navId}] DIFFERENT SPINE: fetching chapter ${spineIndex}`);
 
     try {
       const html = await getChapter($currentBookId, spineIndex);
+      console.log(`[NAV ${navId}] getChapter returned, html length=${html?.length}, setting stores. _navId is now ${_navId}`);
+      if (navId !== _navId) {
+        console.warn(`[NAV ${navId}] STALE: a newer nav (${_navId}) was started, skipping store update`);
+        return;
+      }
+      
+      pendingHash = hash || null;
+      isNavigatingToStart = !hash;
+      navigationGeneration++;
+      
       currentSpineIndex.set(spineIndex);
       currentChapter.set(html);
       if (!hash && $currentBookId) {
         saveProgress($currentBookId, spineIndex, 0);
       }
     } catch (err) {
-      console.error('Failed to load chapter on navigate:', err);
+      console.error(`[NAV ${navId}] Failed to load chapter:`, err);
     } finally {
       loading = false;
     }
@@ -1724,37 +1815,7 @@
 
   function handleIframeLoad() {
     if (!iframeEl?.contentWindow) return;
-
-    if (pendingHash) {
-      const h = pendingHash;
-      pendingHash = null;
-      isNavigatingToStart = false;
-      setTimeout(() => {
-        iframeEl?.contentWindow?.postMessage({ type: 'scroll-to-hash', hash: h }, '*');
-        setTimeout(queuePageCalculation, 120);
-      }, 50);
-    } else if (isNavigatingToStart) {
-      isNavigatingToStart = false;
-      iframeEl.contentWindow.postMessage({ type: 'scroll-to-top' }, '*');
-      setTimeout(queuePageCalculation, 60);
-    } else {
-      getProgress($currentBookId).then((pos) => {
-        if (pos && pos.spineIndex === $currentSpineIndex && pos.scrollOffset && iframeEl?.contentWindow) {
-          iframeEl.contentWindow.postMessage({ type: 'scroll-to-offset', offset: pos.scrollOffset }, '*');
-        } else if (iframeEl?.contentWindow) {
-          iframeEl.contentWindow.postMessage({ type: 'scroll-to-top' }, '*');
-        }
-        setTimeout(queuePageCalculation, 100);
-      });
-    }
-
-    if ($currentBookId) {
-      const chHighlights = $highlights.filter(h => h.bookId === $currentBookId && h.spineIndex === $currentSpineIndex);
-      iframeEl.contentWindow.postMessage({
-        type: 'sync-highlights',
-        highlights: chHighlights
-      }, '*');
-    }
+    console.log(`[IFRAME_LOAD] native load event fired. (Handled via iframe-ready now)`);
 
     if (iframeResizeObserver) {
       iframeResizeObserver.disconnect();
