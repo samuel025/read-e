@@ -6,6 +6,7 @@
   import { getHighlights, getBookmarks } from './api.js';
   import HighlightsSidebar from './HighlightsSidebar.svelte';
   import BookmarksSidebar from './BookmarksSidebar.svelte';
+  import TOCItem from './TOCItem.svelte';
 
   let selectedKey = null;
 
@@ -59,7 +60,7 @@
     if (!bookId || !entry) return;
 
     selectedKey = getEntryKey(entry);
-    const spineIndex = typeof entry.spineIndex === 'number' ? entry.spineIndex : 0;
+    const spineIndex = (typeof entry.spineIndex === 'number' && !isNaN(entry.spineIndex)) ? entry.spineIndex : 0;
 
     if ($currentBook?.format === 'pdf') {
       window.dispatchEvent(new CustomEvent('pdf-scroll-to-toc', {
@@ -72,7 +73,11 @@
       return;
     }
 
-    const hash = entry.href && entry.href.includes('#') ? entry.href.split('#')[1] : null;
+    let hash = null;
+    if (entry.href && entry.href.includes('#')) {
+      const raw = entry.href.substring(entry.href.indexOf('#') + 1);
+      hash = raw.split('?')[0].split('&')[0];
+    }
 
     window.dispatchEvent(new CustomEvent('epub-navigate-to', {
       detail: {
@@ -138,30 +143,13 @@
       {:else}
         <ul class="toc-entries">
           {#each $toc as entry}
-            <li>
-              <button
-                class="toc-entry"
-                class:active={activeKey === getEntryKey(entry)}
-                on:click={() => navigateTo(entry)}
-              >
-                <span class="toc-entry-title">{entry.title}</span>
-              </button>
-              {#if entry.children && entry.children.length > 0}
-                <ul class="toc-children">
-                  {#each entry.children as child}
-                    <li>
-                      <button
-                        class="toc-entry toc-child"
-                        class:active={activeKey === getEntryKey(child)}
-                        on:click={() => navigateTo(child)}
-                      >
-                        <span class="toc-entry-title">{child.title}</span>
-                      </button>
-                    </li>
-                  {/each}
-                </ul>
-              {/if}
-            </li>
+            <TOCItem
+              item={entry}
+              depth={0}
+              {activeKey}
+              {getEntryKey}
+              onNavigate={navigateTo}
+            />
           {/each}
         </ul>
       {/if}
@@ -254,55 +242,5 @@
     list-style: none;
     margin: 0;
     padding: 0;
-  }
-
-  .toc-children {
-    list-style: none;
-    padding-left: var(--space-md);
-    margin: 0;
-  }
-
-  .toc-entry {
-    display: block;
-    width: 100%;
-    text-align: left;
-    padding: 6px 10px;
-    margin: 1px 0;
-    border: none;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--fg-secondary);
-    font-family: var(--font-sans);
-    font-size: 0.8125rem;
-    line-height: 1.4;
-    cursor: pointer;
-    transition: background var(--duration-fast) var(--ease-out),
-                color var(--duration-fast) var(--ease-out);
-  }
-
-  .toc-entry:hover {
-    background: var(--bg-hover);
-    color: var(--fg-primary);
-  }
-
-  .toc-entry.active {
-    background: var(--accent-subtle);
-    color: var(--accent);
-    font-weight: 500;
-  }
-
-  .toc-entry:active {
-    transform: scale(0.98);
-  }
-
-  .toc-child {
-    font-size: 0.75rem;
-  }
-
-  .toc-entry-title {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
   }
 </style>

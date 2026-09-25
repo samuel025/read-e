@@ -18,17 +18,17 @@ Ready-to-use binaries for Linux x86_64 are available on [GitHub Releases](https:
 
 | Package | Platform | Direct Download |
 | --- | --- | --- |
-| **AppImage** (Recommended) | Universal (Ubuntu, Fedora, Arch, Mint, openSUSE, Debian, etc.) | [📥 `read-e_1.0.1_x86_64.AppImage`](https://github.com/samuel025/read-e/releases/latest/download/read-e_1.0.1_x86_64.AppImage) |
-| **Debian Package** | Ubuntu, Debian, Pop!_OS, Linux Mint | [📥 `read-e_1.0.1_amd64.deb`](https://github.com/samuel025/read-e/releases/latest/download/read-e_1.0.1_amd64.deb) |
+| **AppImage** (Recommended) | Universal (Ubuntu, Fedora, Arch, Mint, openSUSE, Debian, etc.) | [📥 `read-e_1.0.2_x86_64.AppImage`](https://github.com/samuel025/read-e/releases/latest/download/read-e_1.0.2_x86_64.AppImage) |
+| **Debian Package** | Ubuntu, Debian, Pop!_OS, Linux Mint | [📥 `read-e_1.0.2_amd64.deb`](https://github.com/samuel025/read-e/releases/latest/download/read-e_1.0.2_amd64.deb) |
 
 #### Quick Start:
 ```bash
 # 1. Run portable AppImage (no install needed)
-chmod +x read-e_1.0.1_x86_64.AppImage
-./read-e_1.0.1_x86_64.AppImage
+chmod +x read-e_1.0.2_x86_64.AppImage
+./read-e_1.0.2_x86_64.AppImage
 
 # 2. Or install .deb package on Debian/Ubuntu
-sudo dpkg -i read-e_1.0.1_amd64.deb
+sudo dpkg -i read-e_1.0.2_amd64.deb
 ```
 
 ---
@@ -140,8 +140,8 @@ python3 scripts/package-appimage.py
 
 Run the resulting AppImage:
 ```bash
-chmod +x ./dist/read-e_1.0.1_x86_64.AppImage
-./dist/read-e_1.0.1_x86_64.AppImage
+chmod +x ./dist/read-e_1.0.2_x86_64.AppImage
+./dist/read-e_1.0.2_x86_64.AppImage
 ```
 
 #### 2. Debian / Ubuntu Package (.deb)
@@ -158,9 +158,9 @@ python3 scripts/package-deb.py
 
 Install the resulting `.deb` package:
 ```bash
-sudo apt install ./dist/read-e_1.0.1_amd64.deb
+sudo apt install ./dist/read-e_1.0.2_amd64.deb
 # or
-sudo dpkg -i ./dist/read-e_1.0.1_amd64.deb
+sudo dpkg -i ./dist/read-e_1.0.2_amd64.deb
 ```
 
 #### 3. Build All Packages

@@ -18,15 +18,16 @@
 
   async function navigate(delta) {
     const newIndex = $currentSpineIndex + delta;
-    if (newIndex < 0 || newIndex >= $spineCount) return;
+    if (newIndex < 0 || ($spineCount > 0 && newIndex >= $spineCount)) return;
 
     loading = true;
-    currentSpineIndex.set(newIndex);
-
     try {
       const html = await getChapter($currentBookId, newIndex);
+      currentSpineIndex.set(newIndex);
       currentChapter.set(html);
       saveProgress($currentBookId, newIndex, 0);
+    } catch (err) {
+      console.error('Failed to navigate chapter:', err);
     } finally {
       loading = false;
     }
@@ -1326,20 +1327,26 @@
 
           function findHashTarget(rawHash) {
             if (!rawHash) return null;
+            rawHash = String(rawHash).trim().replace(/^#+/, '');
+            if (!rawHash) return null;
+
             var candidates = [rawHash];
             try {
               var decoded = decodeURIComponent(rawHash);
-              if (decoded && decoded !== rawHash) candidates.push(decoded);
+              if (decoded && candidates.indexOf(decoded) === -1) candidates.push(decoded);
             } catch(err) {}
             try {
               var unescaped = unescape(rawHash);
-              if (unescaped && unescaped !== rawHash && candidates.indexOf(unescaped) === -1) candidates.push(unescaped);
+              if (unescaped && candidates.indexOf(unescaped) === -1) candidates.push(unescaped);
             } catch(err) {}
 
             for (var i = 0; i < candidates.length; i++) {
               var h = candidates[i];
               var el = document.getElementById(h);
               if (el) return el;
+
+              var named = document.getElementsByName(h);
+              if (named && named.length > 0) return named[0];
 
               try {
                 el = document.querySelector('[name="' + CSS.escape(h) + '"]');
@@ -1356,23 +1363,66 @@
                 if (el) return el;
               } catch(err) {}
             }
+
+            var lowerCandidates = candidates.map(function(c) { return c.toLowerCase(); });
+            var allAnchors = document.querySelectorAll('[id], [name]');
+            for (var j = 0; j < allAnchors.length; j++) {
+              var cEl = allAnchors[j];
+              var cId = (cEl.id || '').toLowerCase();
+              var cName = (cEl.getAttribute('name') || '').toLowerCase();
+              for (var k = 0; k < lowerCandidates.length; k++) {
+                if (cId === lowerCandidates[k] || cName === lowerCandidates[k]) {
+                  return cEl;
+                }
+              }
+            }
+
             return null;
+          }
+
+          function scrollElementIntoView(target) {
+            var rect = target.getBoundingClientRect();
+            var currentScroll = window.pageYOffset || (document.documentElement ? document.documentElement.scrollTop : 0) || (document.body ? document.body.scrollTop : 0) || 0;
+
+            var scrollElem = target;
+            if (scrollElem.offsetHeight === 0 && scrollElem.nextElementSibling) {
+              var nextRect = scrollElem.nextElementSibling.getBoundingClientRect();
+              if (nextRect.height > 0) {
+                rect = nextRect;
+                scrollElem = scrollElem.nextElementSibling;
+              }
+            }
+
+            var targetY = Math.max(0, Math.round(currentScroll + rect.top - 24));
+            window.scrollTo(0, targetY);
+            if (document.documentElement) document.documentElement.scrollTop = targetY;
+            if (document.body) document.body.scrollTop = targetY;
+
+            target.classList.remove('reader-target-highlight');
+            void target.offsetWidth;
+            target.classList.add('reader-target-highlight');
+            setTimeout(function() {
+              target.classList.remove('reader-target-highlight');
+            }, 1800);
           }
 
           function scrollToHashWithRetry(hash, attempts) {
             attempts = attempts || 0;
             var target = findHashTarget(hash);
             if (target) {
-              target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              target.classList.remove('reader-target-highlight');
-              void target.offsetWidth;
-              target.classList.add('reader-target-highlight');
+              scrollElementIntoView(target);
               setTimeout(function() {
-                target.classList.remove('reader-target-highlight');
-              }, 1800);
+                var t = findHashTarget(hash);
+                if (t) {
+                  var r = t.getBoundingClientRect();
+                  if (Math.abs(r.top - 24) > 15) {
+                    scrollElementIntoView(t);
+                  }
+                }
+              }, 200);
               return;
             }
-            if (attempts < 6) {
+            if (attempts < 15) {
               setTimeout(function() {
                 scrollToHashWithRetry(hash, attempts + 1);
               }, 80);
@@ -1394,7 +1444,9 @@
                 scrollToHashWithRetry(e.data.hash, 0);
               }
             } else if (e.data.type === 'scroll-to-top') {
-              window.scrollTo({ top: 0, behavior: 'smooth' });
+              window.scrollTo(0, 0);
+              if (document.documentElement) document.documentElement.scrollTop = 0;
+              if (document.body) document.body.scrollTop = 0;
             } else if (e.data.type === 'remove-highlight-mark') {
               var allMarks = document.querySelectorAll('mark[data-highlight-id="' + e.data.highlightId + '"]');
               for (var m = 0; m < allMarks.length; m++) {
@@ -1529,7 +1581,7 @@
   async function handleNavigateTo(e) {
     const { spineIndex, hash } = e.detail || {};
     if (typeof spineIndex !== 'number' || isNaN(spineIndex)) return;
-    if (spineIndex < 0 || spineIndex >= $spineCount) return;
+    if (spineIndex < 0 || ($spineCount > 0 && spineIndex >= $spineCount)) return;
 
     if ($currentSpineIndex === spineIndex) {
       if (hash) {
@@ -1538,7 +1590,6 @@
         }
       } else {
         if (iframeEl?.contentWindow) {
-          iframeEl.contentWindow.scrollTo({ top: 0, behavior: 'smooth' });
           iframeEl.contentWindow.postMessage({ type: 'scroll-to-top' }, '*');
         }
         if ($currentBookId) {
@@ -1551,10 +1602,10 @@
     loading = true;
     pendingHash = hash || null;
     isNavigatingToStart = !hash;
-    currentSpineIndex.set(spineIndex);
 
     try {
       const html = await getChapter($currentBookId, spineIndex);
+      currentSpineIndex.set(spineIndex);
       currentChapter.set(html);
       if (!hash && $currentBookId) {
         saveProgress($currentBookId, spineIndex, 0);
@@ -1681,18 +1732,17 @@
       setTimeout(() => {
         iframeEl?.contentWindow?.postMessage({ type: 'scroll-to-hash', hash: h }, '*');
         setTimeout(queuePageCalculation, 120);
-      }, 60);
+      }, 50);
     } else if (isNavigatingToStart) {
       isNavigatingToStart = false;
-      iframeEl.contentWindow.scrollTo(0, 0);
       iframeEl.contentWindow.postMessage({ type: 'scroll-to-top' }, '*');
       setTimeout(queuePageCalculation, 60);
     } else {
       getProgress($currentBookId).then((pos) => {
         if (pos && pos.spineIndex === $currentSpineIndex && pos.scrollOffset && iframeEl?.contentWindow) {
-          iframeEl.contentWindow.scrollTo(0, pos.scrollOffset);
+          iframeEl.contentWindow.postMessage({ type: 'scroll-to-offset', offset: pos.scrollOffset }, '*');
         } else if (iframeEl?.contentWindow) {
-          iframeEl.contentWindow.scrollTo(0, 0);
+          iframeEl.contentWindow.postMessage({ type: 'scroll-to-top' }, '*');
         }
         setTimeout(queuePageCalculation, 100);
       });

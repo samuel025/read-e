@@ -328,3 +328,52 @@ func TestTOCSpineResolutionComplex(t *testing.T) {
 	}
 }
 
+func TestRealBooksTOC(t *testing.T) {
+	files := []string{
+		"/home/samuel/Downloads/Gentle and Lowly -- Dane C_ Ortlund -- 2020 -- Crossway -- 89858eb4be42a872d0af7c466979792c -- Anna’s Archive.epub",
+		"/home/samuel/Downloads/How Christianity Changed the World -- Alvin J_ Schmidt [Schmidt, Alvin J_] -- 2004 -- Zondervan -- 6147a0084d2a7372dc0c8dc0e0612237 -- Anna’s Archive.epub",
+		"/home/samuel/Downloads/The Space Trilogy, Omnib_ Three Science Fiction Classics in -- Lewis, C_ S_ -- 1938 -- HarperCollins Publishers -- 9780062340870 -- 5cb3042e8b88a16ae4ac816ce8f1a1b3 -- Anna’s Archive.epub",
+		"/home/samuel/Downloads/Thinking in Systems_ A Primer -- Donella H_ Meadows -- 2008 -- chenjin5_com 万千书友聚集地 -- 3711d3d15119ee25b4e8f9b3157586be -- Anna’s Archive.epub",
+		"/home/samuel/Downloads/Thinking, fast and slow -- Kahneman, Daniel -- 1st ed, 2011 -- Farrar, Straus and Giroux -- isbn13 9780141033570 -- 254f00396ce2e402aafe8867f48534f5 -- Anna’s Archive.epub",
+		"/home/samuel/Downloads/Red Rising - Red Rising, Book 1 -- Pierce Brown -- Red Rising trilogy, bk_ 1, 2014 Del Rey trade pbk_ ed, New -- Del Rey Trade Paperbacks, [publisher -- isbn13 9780345539786 -- b10dfd8c22e61f01f3df2c0e3cd44cf0 -- Anna’s Archive.epub",
+		"/home/samuel/Downloads/aristotle_nicomachean-ethics_f-h-peters.epub",
+		"/home/samuel/Downloads/pg5827-images-3.epub",
+		"/home/samuel/Videos/Golden Son.epub",
+	}
+
+	for _, f := range files {
+		if _, err := os.Stat(f); err != nil {
+			continue
+		}
+		t.Logf("=== TESTING BOOK: %s ===", f)
+		reader, err := epub.Open(f)
+		if err != nil {
+			t.Logf("Failed to open %s: %v", f, err)
+			continue
+		}
+		defer reader.Close()
+
+		t.Logf("Spine count: %d", len(reader.SpineItems()))
+		for i, s := range reader.SpineItems() {
+			if i < 5 || i >= len(reader.SpineItems())-3 {
+				t.Logf("  Spine[%d] = %s", i, s.Href)
+			}
+		}
+
+		toc := reader.TOC()
+		t.Logf("TOC count: %d", len(toc))
+		var printTOC func(entries []epub.TOCEntry, depth int)
+		printTOC = func(entries []epub.TOCEntry, depth int) {
+			for _, e := range entries {
+				indent := strings.Repeat("  ", depth)
+				t.Logf("%s- [%d] %q (href: %q)", indent, e.SpineIndex, e.Title, e.Href)
+				if len(e.Children) > 0 {
+					printTOC(e.Children, depth+1)
+				}
+			}
+		}
+		printTOC(toc, 1)
+	}
+}
+
+

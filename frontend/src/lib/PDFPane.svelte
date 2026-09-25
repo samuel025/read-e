@@ -1127,41 +1127,11 @@
   }
 
   async function handleScrollToTocEvent(e) {
-    const { pageIndex, title } = e.detail || {};
+    const { pageIndex } = e.detail || {};
     if (pageIndex === undefined || pageIndex === null || isNaN(pageIndex)) return;
 
     const targetPage = Math.max(1, Math.min(pageIndex + 1, numPages || (pageIndex + 1)));
     scrollToPage(targetPage);
-
-    if (title) {
-      const cleanTitle = title.replace(/^[0-9.]+\s*/, '').trim().toLowerCase();
-      const fullTitle = title.trim().toLowerCase();
-
-      const findAndScrollToHeading = (attempts = 0) => {
-        const textLayer = document.getElementById(`page-${pageIndex + 1}`)?.querySelector('.textLayer');
-        if (textLayer) {
-          const spans = textLayer.querySelectorAll('span');
-          let matchedSpan = null;
-          for (const span of spans) {
-            const txt = span.textContent.trim().toLowerCase();
-            if (txt && (txt.includes(cleanTitle) || cleanTitle.includes(txt) || txt.includes(fullTitle))) {
-              matchedSpan = span;
-              break;
-            }
-          }
-          if (matchedSpan) {
-            matchedSpan.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            matchedSpan.classList.add('pdf-search-pulse');
-            setTimeout(() => matchedSpan.classList.remove('pdf-search-pulse'), 2000);
-            return;
-          }
-        }
-        if (attempts < 8) {
-          setTimeout(() => findAndScrollToHeading(attempts + 1), 120);
-        }
-      };
-      setTimeout(() => findAndScrollToHeading(0), 100);
-    }
   }
 
   function handleScrollToBookmarkEvent(e) {
