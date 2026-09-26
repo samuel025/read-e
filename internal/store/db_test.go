@@ -286,5 +286,105 @@ func TestStore(t *testing.T) {
 			t.Errorf("expected finished to be false after explicit unmark")
 		}
 	})
+
+	// 7. Shelves test
+	t.Run("Shelves", func(t *testing.T) {
+		// Create shelf
+		shelf, err := st.CreateShelf("Sci-Fi Classics", "Great sci-fi reads", "#10b981")
+		if err != nil {
+			t.Fatalf("failed to create shelf: %v", err)
+		}
+		if shelf.Name != "Sci-Fi Classics" || shelf.Color != "#10b981" || shelf.BookCount != 0 {
+			t.Errorf("unexpected shelf: %+v", shelf)
+		}
+
+		// Empty name should fail
+		if _, err := st.CreateShelf("   ", "", ""); err == nil {
+			t.Errorf("expected error for empty shelf name, got nil")
+		}
+
+		// Retrieve shelves
+		shelves, err := st.GetShelves()
+		if err != nil {
+			t.Fatalf("failed to get shelves: %v", err)
+		}
+		if len(shelves) != 1 || shelves[0].ID != shelf.ID {
+			t.Fatalf("expected 1 shelf with ID %s, got %+v", shelf.ID, shelves)
+		}
+
+		// Add a book to shelf
+		book := library.BookMeta{
+			ID:       "book-scifi-1",
+			Title:    "Dune",
+			Author:   "Frank Herbert",
+			FilePath: "/path/to/dune.epub",
+		}
+		if err := st.UpsertBook(book); err != nil {
+			t.Fatalf("failed to upsert book: %v", err)
+		}
+
+		if err := st.AddBookToShelf(shelf.ID, book.ID); err != nil {
+			t.Fatalf("failed to add book to shelf: %v", err)
+		}
+
+		// Verify count in GetShelves
+		shelves, err = st.GetShelves()
+		if err != nil || len(shelves) != 1 || shelves[0].BookCount != 1 {
+			t.Errorf("expected shelf book count 1, got %+v", shelves)
+		}
+
+		// Verify GetShelfBookIDs
+		bookIDs, err := st.GetShelfBookIDs(shelf.ID)
+		if err != nil || len(bookIDs) != 1 || bookIDs[0] != book.ID {
+			t.Errorf("expected [%s], got %+v", book.ID, bookIDs)
+		}
+
+		// Verify GetBookShelfIDs
+		shelfIDs, err := st.GetBookShelfIDs(book.ID)
+		if err != nil || len(shelfIDs) != 1 || shelfIDs[0] != shelf.ID {
+			t.Errorf("expected [%s], got %+v", shelf.ID, shelfIDs)
+		}
+
+		// Update shelf
+		if err := st.UpdateShelf(shelf.ID, "Science Fiction", "Updated desc", "#6366f1"); err != nil {
+			t.Fatalf("failed to update shelf: %v", err)
+		}
+		updated, err := st.GetShelf(shelf.ID)
+		if err != nil || updated.Name != "Science Fiction" || updated.Color != "#6366f1" {
+			t.Errorf("unexpected updated shelf: %+v", updated)
+		}
+
+		// Set multiple shelves
+		shelf2, err := st.CreateShelf("Favorites", "", "")
+		if err != nil {
+			t.Fatalf("failed to create second shelf: %v", err)
+		}
+		if err := st.SetBookShelves(book.ID, []string{shelf.ID, shelf2.ID}); err != nil {
+			t.Fatalf("failed to set book shelves: %v", err)
+		}
+		shelfIDs, err = st.GetBookShelfIDs(book.ID)
+		if err != nil || len(shelfIDs) != 2 {
+			t.Errorf("expected 2 shelves for book, got %+v", shelfIDs)
+		}
+
+		// Remove book from one shelf
+		if err := st.RemoveBookFromShelf(shelf.ID, book.ID); err != nil {
+			t.Fatalf("failed to remove book from shelf: %v", err)
+		}
+		shelfIDs, _ = st.GetBookShelfIDs(book.ID)
+		if len(shelfIDs) != 1 || shelfIDs[0] != shelf2.ID {
+			t.Errorf("expected only shelf2, got %+v", shelfIDs)
+		}
+
+		// Delete shelf
+		if err := st.DeleteShelf(shelf2.ID); err != nil {
+			t.Fatalf("failed to delete shelf: %v", err)
+		}
+		shelves, _ = st.GetShelves()
+		if len(shelves) != 1 {
+			t.Errorf("expected 1 shelf left, got %d", len(shelves))
+		}
+	})
 }
+
 

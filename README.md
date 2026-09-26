@@ -18,17 +18,17 @@ Ready-to-use binaries for Linux x86_64 are available on [GitHub Releases](https:
 
 | Package | Platform | Direct Download |
 | --- | --- | --- |
-| **AppImage** (Recommended) | Universal (Ubuntu, Fedora, Arch, Mint, openSUSE, Debian, etc.) | [📥 `read-e_1.0.3_x86_64.AppImage`](https://github.com/samuel025/read-e/releases/latest/download/read-e_1.0.3_x86_64.AppImage) |
-| **Debian Package** | Ubuntu, Debian, Pop!_OS, Linux Mint | [📥 `read-e_1.0.3_amd64.deb`](https://github.com/samuel025/read-e/releases/latest/download/read-e_1.0.3_amd64.deb) |
+| **AppImage** (Recommended) | Universal (Ubuntu, Fedora, Arch, Mint, openSUSE, Debian, etc.) | [📥 `read-e_2.0.0_x86_64.AppImage`](https://github.com/samuel025/read-e/releases/latest/download/read-e_2.0.0_x86_64.AppImage) |
+| **Debian Package** | Ubuntu, Debian, Pop!_OS, Linux Mint | [📥 `read-e_2.0.0_amd64.deb`](https://github.com/samuel025/read-e/releases/latest/download/read-e_2.0.0_amd64.deb) |
 
 #### Quick Start:
 ```bash
 # 1. Run portable AppImage (no install needed)
-chmod +x read-e_1.0.3_x86_64.AppImage
-./read-e_1.0.3_x86_64.AppImage
+chmod +x read-e_2.0.0_x86_64.AppImage
+./read-e_2.0.0_x86_64.AppImage
 
 # 2. Or install .deb package on Debian/Ubuntu
-sudo dpkg -i read-e_1.0.3_amd64.deb
+sudo dpkg -i read-e_2.0.0_amd64.deb
 ```
 
 ---
@@ -66,7 +66,9 @@ sudo dpkg -i read-e_1.0.3_amd64.deb
 - 30-Day Activity Heatmap: Visual GitHub-style daily reading grid displaying habit trends over the past month.
 - Automatic Completion: Books are automatically marked as "Finished" upon reading through the final chapter or page.
 
-### Library Management
+### Library Management & Custom Shelves
+- Custom Bookshelves: Organize your library with color-coded custom shelves and collections (e.g., Sci-Fi, Work, Favorites).
+- Bulk Shelf Assignment: Easily add and remove multiple books to and from any shelf with live search and filter.
 - Local File Import: Add individual `.epub` or `.pdf` files, or recursively scan local directories.
 - Automated Cover Extraction: Multi-tier cover discovery supporting OPF manifest properties, metadata identifiers, PDF.js first-page rendering, and structural heuristics.
 - Format Indicators: Visual document format badges for clear distinction between EPUB and PDF library items.
@@ -140,8 +142,8 @@ python3 scripts/package-appimage.py
 
 Run the resulting AppImage:
 ```bash
-chmod +x ./dist/read-e_1.0.3_x86_64.AppImage
-./dist/read-e_1.0.3_x86_64.AppImage
+chmod +x ./dist/read-e_2.0.0_x86_64.AppImage
+./dist/read-e_2.0.0_x86_64.AppImage
 ```
 
 #### 2. Debian / Ubuntu Package (.deb)
@@ -158,9 +160,9 @@ python3 scripts/package-deb.py
 
 Install the resulting `.deb` package:
 ```bash
-sudo apt install ./dist/read-e_1.0.3_amd64.deb
+sudo apt install ./dist/read-e_2.0.0_amd64.deb
 # or
-sudo dpkg -i ./dist/read-e_1.0.3_amd64.deb
+sudo dpkg -i ./dist/read-e_2.0.0_amd64.deb
 ```
 
 #### 3. Build All Packages

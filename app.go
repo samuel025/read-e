@@ -139,6 +139,47 @@ func (a *App) RemoveBook(bookID string) error {
 	return a.store.RemoveBook(bookID)
 }
 
+func (a *App) CreateShelf(name, description, color string) (store.Shelf, error) {
+	return a.store.CreateShelf(name, description, color)
+}
+
+func (a *App) GetShelves() ([]store.Shelf, error) {
+	return a.store.GetShelves()
+}
+
+func (a *App) GetShelf(shelfID string) (store.Shelf, error) {
+	return a.store.GetShelf(shelfID)
+}
+
+func (a *App) UpdateShelf(id, name, description, color string) error {
+	return a.store.UpdateShelf(id, name, description, color)
+}
+
+func (a *App) DeleteShelf(id string) error {
+	return a.store.DeleteShelf(id)
+}
+
+func (a *App) AddBookToShelf(shelfID, bookID string) error {
+	return a.store.AddBookToShelf(shelfID, bookID)
+}
+
+func (a *App) RemoveBookFromShelf(shelfID, bookID string) error {
+	return a.store.RemoveBookFromShelf(shelfID, bookID)
+}
+
+func (a *App) GetShelfBookIDs(shelfID string) ([]string, error) {
+	return a.store.GetShelfBookIDs(shelfID)
+}
+
+func (a *App) GetBookShelfIDs(bookID string) ([]string, error) {
+	return a.store.GetBookShelfIDs(bookID)
+}
+
+func (a *App) SetBookShelves(bookID string, shelfIDs []string) error {
+	return a.store.SetBookShelves(bookID, shelfIDs)
+}
+
+
 func (a *App) OpenBook(bookID string) (epub.BookInfo, error) {
 	meta, err := a.store.GetBook(bookID)
 	if err == nil && meta.Format == "pdf" {

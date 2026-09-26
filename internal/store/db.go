@@ -1,7 +1,9 @@
 package store
 
 import (
+	crand "crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"os"
@@ -98,6 +100,24 @@ func (s *Store) migrate() error {
 		data_json TEXT NOT NULL,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
+	CREATE TABLE IF NOT EXISTS shelves (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		description TEXT NOT NULL DEFAULT '',
+		color TEXT NOT NULL DEFAULT '#818cf8',
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE TABLE IF NOT EXISTS shelf_books (
+		shelf_id TEXT NOT NULL,
+		book_id TEXT NOT NULL,
+		added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (shelf_id, book_id),
+		FOREIGN KEY (shelf_id) REFERENCES shelves(id) ON DELETE CASCADE,
+		FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_shelf_books_shelf ON shelf_books(shelf_id);
+	CREATE INDEX IF NOT EXISTS idx_shelf_books_book ON shelf_books(book_id);
 	`
 	if _, err := s.db.Exec(schema); err != nil {
 		return err
@@ -120,6 +140,30 @@ func (s *Store) migrate() error {
 			pages_turned INTEGER NOT NULL DEFAULT 0
 		);
 	`)
+
+	// Safely create shelves tables if migrating existing database
+	_, _ = s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS shelves (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			description TEXT NOT NULL DEFAULT '',
+			color TEXT NOT NULL DEFAULT '#818cf8',
+			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
+	`)
+	_, _ = s.db.Exec(`
+		CREATE TABLE IF NOT EXISTS shelf_books (
+			shelf_id TEXT NOT NULL,
+			book_id TEXT NOT NULL,
+			added_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (shelf_id, book_id),
+			FOREIGN KEY (shelf_id) REFERENCES shelves(id) ON DELETE CASCADE,
+			FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE
+		);
+	`)
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_shelf_books_shelf ON shelf_books(shelf_id);`)
+	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_shelf_books_book ON shelf_books(book_id);`)
 
 	// Backfill any existing books with total_count <= 0
 	rows, err := s.db.Query("SELECT id, file_path, format FROM books WHERE total_count <= 0")
@@ -544,4 +588,205 @@ func (s *Store) SaveCachedDefinition(word string, dataJSON string) error {
 	`, word, dataJSON)
 	return err
 }
+
+// Shelves Models and Methods
+
+type Shelf struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Color       string    `json:"color"`
+	BookCount   int       `json:"bookCount"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+func generateShelfID() string {
+	b := make([]byte, 4)
+	_, _ = crand.Read(b)
+	return fmt.Sprintf("shelf_%d_%s", time.Now().UnixMilli(), hex.EncodeToString(b))
+}
+
+func (s *Store) CreateShelf(name, description, color string) (Shelf, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return Shelf{}, fmt.Errorf("shelf name cannot be empty")
+	}
+	if color == "" {
+		color = "#818cf8"
+	}
+	now := time.Now().UTC()
+	shelf := Shelf{
+		ID:          generateShelfID(),
+		Name:        name,
+		Description: strings.TrimSpace(description),
+		Color:       color,
+		BookCount:   0,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	_, err := s.db.Exec(`
+		INSERT INTO shelves (id, name, description, color, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, shelf.ID, shelf.Name, shelf.Description, shelf.Color, shelf.CreatedAt, shelf.UpdatedAt)
+	if err != nil {
+		return Shelf{}, err
+	}
+	return shelf, nil
+}
+
+func (s *Store) GetShelves() ([]Shelf, error) {
+	rows, err := s.db.Query(`
+		SELECT s.id, s.name, s.description, s.color, s.created_at, s.updated_at,
+		       COUNT(sb.book_id) as book_count
+		FROM shelves s
+		LEFT JOIN shelf_books sb ON s.id = sb.shelf_id
+		GROUP BY s.id
+		ORDER BY s.created_at ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var shelves []Shelf
+	for rows.Next() {
+		var sh Shelf
+		if err := rows.Scan(&sh.ID, &sh.Name, &sh.Description, &sh.Color, &sh.CreatedAt, &sh.UpdatedAt, &sh.BookCount); err != nil {
+			return nil, err
+		}
+		shelves = append(shelves, sh)
+	}
+	if shelves == nil {
+		shelves = []Shelf{}
+	}
+	return shelves, rows.Err()
+}
+
+func (s *Store) GetShelf(shelfID string) (Shelf, error) {
+	var sh Shelf
+	err := s.db.QueryRow(`
+		SELECT s.id, s.name, s.description, s.color, s.created_at, s.updated_at,
+		       COUNT(sb.book_id) as book_count
+		FROM shelves s
+		LEFT JOIN shelf_books sb ON s.id = sb.shelf_id
+		WHERE s.id = ?
+		GROUP BY s.id
+	`, shelfID).Scan(&sh.ID, &sh.Name, &sh.Description, &sh.Color, &sh.CreatedAt, &sh.UpdatedAt, &sh.BookCount)
+	return sh, err
+}
+
+func (s *Store) UpdateShelf(id, name, description, color string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("shelf name cannot be empty")
+	}
+	if color == "" {
+		color = "#818cf8"
+	}
+	now := time.Now().UTC()
+	_, err := s.db.Exec(`
+		UPDATE shelves
+		SET name = ?, description = ?, color = ?, updated_at = ?
+		WHERE id = ?
+	`, name, strings.TrimSpace(description), color, now, id)
+	return err
+}
+
+func (s *Store) DeleteShelf(id string) error {
+	_, err := s.db.Exec("DELETE FROM shelves WHERE id = ?", id)
+	return err
+}
+
+func (s *Store) AddBookToShelf(shelfID, bookID string) error {
+	_, err := s.db.Exec(`
+		INSERT OR IGNORE INTO shelf_books (shelf_id, book_id, added_at)
+		VALUES (?, ?, CURRENT_TIMESTAMP)
+	`, shelfID, bookID)
+	return err
+}
+
+func (s *Store) RemoveBookFromShelf(shelfID, bookID string) error {
+	_, err := s.db.Exec(`
+		DELETE FROM shelf_books WHERE shelf_id = ? AND book_id = ?
+	`, shelfID, bookID)
+	return err
+}
+
+func (s *Store) GetShelfBookIDs(shelfID string) ([]string, error) {
+	rows, err := s.db.Query(`
+		SELECT book_id FROM shelf_books WHERE shelf_id = ? ORDER BY added_at DESC
+	`, shelfID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return ids, rows.Err()
+}
+
+func (s *Store) GetBookShelfIDs(bookID string) ([]string, error) {
+	rows, err := s.db.Query(`
+		SELECT shelf_id FROM shelf_books WHERE book_id = ?
+	`, bookID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if ids == nil {
+		ids = []string{}
+	}
+	return ids, rows.Err()
+}
+
+func (s *Store) SetBookShelves(bookID string, shelfIDs []string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("DELETE FROM shelf_books WHERE book_id = ?", bookID); err != nil {
+		return err
+	}
+
+	stmt, err := tx.Prepare("INSERT OR IGNORE INTO shelf_books (shelf_id, book_id, added_at) VALUES (?, ?, CURRENT_TIMESTAMP)")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, sID := range shelfIDs {
+		sID = strings.TrimSpace(sID)
+		if sID != "" {
+			if _, err := stmt.Exec(sID, bookID); err != nil {
+				return err
+			}
+		}
+	}
+
+	return tx.Commit()
+}
+
 

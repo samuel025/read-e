@@ -3,6 +3,8 @@ import { writable } from 'svelte/store';
 // ---- Library ----
 export const library = writable([]);
 export const libraryLoading = writable(false);
+export const shelves = writable([]);
+export const activeShelfId = writable('all'); // 'all' | 'reading' | 'finished' | shelfID
 
 // ---- Reader state ----
 export const currentBook = writable(null);

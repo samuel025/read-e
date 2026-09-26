@@ -215,4 +215,65 @@ export async function lookupWord(word) {
   return go.LookupWord(word);
 }
 
+export async function createShelf(name, description = '', color = '#818cf8') {
+  const go = getGoBinding();
+  if (!go) return { id: 'mock-' + Date.now(), name, description, color, bookCount: 0 };
+  return go.CreateShelf(name, description, color);
+}
+
+export async function getShelves() {
+  const go = getGoBinding();
+  if (!go) return [];
+  return go.GetShelves();
+}
+
+export async function getShelf(shelfID) {
+  const go = getGoBinding();
+  if (!go) return null;
+  return go.GetShelf(shelfID);
+}
+
+export async function updateShelf(id, name, description = '', color = '#818cf8') {
+  const go = getGoBinding();
+  if (!go) return;
+  return go.UpdateShelf(id, name, description, color);
+}
+
+export async function deleteShelf(id) {
+  const go = getGoBinding();
+  if (!go) return;
+  return go.DeleteShelf(id);
+}
+
+export async function addBookToShelf(shelfID, bookID) {
+  const go = getGoBinding();
+  if (!go) return;
+  return go.AddBookToShelf(shelfID, bookID);
+}
+
+export async function removeBookFromShelf(shelfID, bookID) {
+  const go = getGoBinding();
+  if (!go) return;
+  return go.RemoveBookFromShelf(shelfID, bookID);
+}
+
+export async function getShelfBookIDs(shelfID) {
+  const go = getGoBinding();
+  if (!go) return [];
+  return go.GetShelfBookIDs(shelfID);
+}
+
+export async function getBookShelfIDs(bookID) {
+  const go = getGoBinding();
+  if (!go) return [];
+  return go.GetBookShelfIDs(bookID);
+}
+
+export async function setBookShelves(bookID, shelfIDs) {
+  const go = getGoBinding();
+  if (!go) return;
+  return go.SetBookShelves(bookID, shelfIDs);
+}
+
+
 

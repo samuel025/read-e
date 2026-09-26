@@ -7,6 +7,7 @@
   } from '../stores/app.js';
 
   export let book;
+  export let isCustomShelf = false;
 
   const dispatch = createEventDispatcher();
 
@@ -54,6 +55,16 @@
   function handleToggleFinished(e) {
     e.stopPropagation();
     dispatch('toggle-finished', { bookId: book.id, finished: !book.finished });
+  }
+
+  function handleManageShelves(e) {
+    e.stopPropagation();
+    dispatch('manage-shelves', book);
+  }
+
+  function handleRemoveFromShelf(e) {
+    e.stopPropagation();
+    dispatch('remove-from-shelf', book.id);
   }
 
   // Generate a gradient fallback when no cover image
@@ -124,7 +135,7 @@
       </div>
     {/if}
 
-    <!-- Card Action Buttons (Finish toggle + Remove) -->
+    <!-- Card Action Buttons (Finish toggle + Shelf + Remove) -->
     <div class="card-actions">
       <button
         class="action-btn finish-btn"
@@ -136,6 +147,29 @@
           <polyline points="20 6 9 17 4 12" />
         </svg>
       </button>
+
+      <button
+        class="action-btn shelf-btn"
+        on:click={handleManageShelves}
+        title="Add to shelf..."
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
+          <path d="M9 10h6"/>
+        </svg>
+      </button>
+
+      {#if isCustomShelf}
+        <button
+          class="action-btn remove-shelf-btn"
+          on:click={handleRemoveFromShelf}
+          title="Remove from this shelf"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+        </button>
+      {/if}
 
       <button
         class="action-btn remove-btn"
@@ -360,6 +394,16 @@
 
   .finish-btn.is-finished:hover {
     background: rgba(239, 68, 68, 0.85);
+  }
+
+  .shelf-btn:hover {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .remove-shelf-btn:hover {
+    background: rgba(245, 158, 11, 0.85);
+    color: #fff;
   }
 
   .remove-btn:hover {
