@@ -13,8 +13,8 @@
   );
 
   $: pagesLeftText = $chapterPageInfo.pagesLeft === 0
-    ? 'End of chapter'
-    : `${$chapterPageInfo.pagesLeft} page${$chapterPageInfo.pagesLeft === 1 ? '' : 's'} left in chapter`;
+    ? 'End of section'
+    : `${$chapterPageInfo.pagesLeft} page${$chapterPageInfo.pagesLeft === 1 ? '' : 's'} left in section`;
 </script>
 
 <footer class="reader-footer" role="status" aria-label="Reading progress">

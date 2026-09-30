@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -23,6 +24,27 @@ type Reader struct {
 	toc          []TOCEntry
 	chapterWords []int
 	wordMu       sync.Mutex
+}
+
+var selfClosingRegex = regexp.MustCompile(`(?i)<([a-zA-Z0-9\-:]+)([^>]*?)\s*/>`)
+var voidElements = map[string]bool{
+	"area": true, "base": true, "br": true, "col": true, "embed": true,
+	"hr": true, "img": true, "input": true, "link": true, "meta": true,
+	"param": true, "source": true, "track": true, "wbr": true,
+}
+
+func fixSelfClosingTags(html string) string {
+	return selfClosingRegex.ReplaceAllStringFunc(html, func(match string) string {
+		sub := selfClosingRegex.FindStringSubmatch(match)
+		if len(sub) == 3 {
+			tagName := strings.ToLower(sub[1])
+			if voidElements[tagName] {
+				return match
+			}
+			return fmt.Sprintf("<%s%s></%s>", sub[1], sub[2], sub[1])
+		}
+		return match
+	})
 }
 
 type containerXML struct {
@@ -136,6 +158,7 @@ func Open(filePath string) (*Reader, error) {
 	}
 
 	r.parseTOC()
+	r.augmentTOCWithHeadings()
 
 	return r, nil
 }
@@ -173,6 +196,7 @@ func (r *Reader) ChapterHTML(spineIndex int) (string, error) {
 	}
 
 	html := string(data)
+	html = fixSelfClosingTags(html)
 	html = r.rewriteResources(html, path.Dir(fullPath))
 
 	return html, nil
@@ -826,6 +850,70 @@ func (r *Reader) getChapterTitle(spineIndex int) string {
 		return t
 	}
 	return fmt.Sprintf("Chapter %d", spineIndex+1)
+}
+
+func insertIntoTOC(entries []TOCEntry, newEntry TOCEntry) ([]TOCEntry, bool) {
+	for i := len(entries) - 1; i >= 0; i-- {
+		if entries[i].SpineIndex < newEntry.SpineIndex {
+			updatedChildren, inserted := insertIntoTOC(entries[i].Children, newEntry)
+			if inserted {
+				entries[i].Children = updatedChildren
+				return entries, true
+			}
+			entries[i].Children = append(entries[i].Children, newEntry)
+			return entries, true
+		}
+	}
+	return entries, false
+}
+
+func (r *Reader) augmentTOCWithHeadings() {
+	covered := make(map[int]bool)
+	var walk func([]TOCEntry)
+	walk = func(entries []TOCEntry) {
+		for _, e := range entries {
+			covered[e.SpineIndex] = true
+			walk(e.Children)
+		}
+	}
+	walk(r.toc)
+
+	headingRegex := regexp.MustCompile(`(?i)<h[1-6][^>]*>(.*?)<\/h[1-6]>`)
+
+	for i, item := range r.spine {
+		if covered[i] {
+			continue
+		}
+
+		fullPath := r.resolvePath(item.Href)
+		data, err := r.readFile(fullPath)
+		if err != nil {
+			continue
+		}
+
+		html := string(data)
+		match := headingRegex.FindStringSubmatch(html)
+		if len(match) > 1 {
+			title := stripHTML(match[1])
+			title = strings.TrimSpace(strings.ReplaceAll(title, "\n", " "))
+			if title != "" && len(title) < 100 {
+				newEntry := TOCEntry{
+					Title:      title,
+					Href:       item.Href,
+					SpineIndex: i,
+				}
+				
+				updatedTOC, inserted := insertIntoTOC(r.toc, newEntry)
+				if inserted {
+					r.toc = updatedTOC
+				} else {
+					r.toc = append([]TOCEntry{newEntry}, r.toc...)
+				}
+				
+				covered[i] = true
+			}
+		}
+	}
 }
 
 func stripHTML(s string) string {

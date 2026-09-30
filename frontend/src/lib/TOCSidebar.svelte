@@ -36,21 +36,24 @@
       if (hasSelectedMatchingSpine) return userSelectedKey;
     }
 
-    let firstMatch = null;
-    function findFirst(entries) {
+    function flattenTOC(entries, arr = []) {
+      if (!entries) return arr;
       for (const e of entries) {
-        if (e.spineIndex === spineIdx) {
-          firstMatch = getEntryKey(e);
-          return;
-        }
+        arr.push(e);
         if (e.children && e.children.length > 0) {
-          findFirst(e.children);
-          if (firstMatch) return;
+          flattenTOC(e.children, arr);
         }
       }
+      return arr;
     }
-    findFirst(tocList);
-    return firstMatch;
+    const flat = flattenTOC(tocList).sort((a, b) => a.spineIndex - b.spineIndex);
+    let bestKey = null;
+    for (const e of flat) {
+      if (e.spineIndex <= spineIdx) {
+        bestKey = getEntryKey(e);
+      }
+    }
+    return bestKey;
   }
 
   $: activeKey = determineActiveKey($toc, $currentSpineIndex, selectedKey);

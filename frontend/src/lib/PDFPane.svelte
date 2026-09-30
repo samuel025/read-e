@@ -205,6 +205,7 @@
           url: `/pdf/${encodeURIComponent(bookId)}`,
           cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
           cMapPacked: true,
+          standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/',
         });
         doc = await currentLoadingTask.promise;
       } catch (streamErr) {
@@ -216,6 +217,7 @@
           data,
           cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
           cMapPacked: true,
+          standardFontDataUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/',
         });
         data = null;
         doc = await currentLoadingTask.promise;

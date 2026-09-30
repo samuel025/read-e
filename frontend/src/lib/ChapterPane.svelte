@@ -1745,18 +1745,24 @@
   let pageCalcRAF = null;
 
   function getChapterTitle(spineIndex) {
-    function findTitle(entries) {
-      if (!entries) return null;
+    function flattenTOC(entries, arr = []) {
+      if (!entries) return arr;
       for (const e of entries) {
-        if (e.spineIndex === spineIndex) return e.title;
+        arr.push(e);
         if (e.children && e.children.length > 0) {
-          const t = findTitle(e.children);
-          if (t) return t;
+          flattenTOC(e.children, arr);
         }
       }
-      return null;
+      return arr;
     }
-    return findTitle($toc) || `Chapter ${spineIndex + 1}`;
+    const flat = flattenTOC($toc).sort((a, b) => a.spineIndex - b.spineIndex);
+    let best = null;
+    for (const e of flat) {
+      if (e.spineIndex <= spineIndex) {
+        best = e.title;
+      }
+    }
+    return best || `Section ${spineIndex + 1}`;
   }
 
   function updateChapterPages() {
@@ -1905,7 +1911,7 @@
       class="nav-btn prev"
       class:disabled={$currentSpineIndex <= 0}
       on:click={() => navigate(-1)}
-      title="Previous chapter"
+      title="Previous section"
       id="prev-chapter-btn"
     >
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1916,7 +1922,7 @@
       class="nav-btn next"
       class:disabled={$currentSpineIndex >= $spineCount - 1}
       on:click={() => navigate(1)}
-      title="Next chapter"
+      title="Next section"
       id="next-chapter-btn"
     >
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
