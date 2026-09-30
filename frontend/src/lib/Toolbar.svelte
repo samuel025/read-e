@@ -221,7 +221,7 @@
 
   <div class="toolbar-center">
     <span class="chapter-indicator">
-      {$currentBook?.format === 'pdf' ? `Page ${$currentSpineIndex + 1}` : ($currentSpineIndex + 1)} / {$spineCount}
+      {$currentBook?.format === 'pdf' ? `Page ${$currentSpineIndex + 1}` : `Section ${$currentSpineIndex + 1}`} / {$spineCount}
     </span>
     <div class="progress-bar-container">
       <div
