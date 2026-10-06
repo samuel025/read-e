@@ -376,4 +376,75 @@ func TestRealBooksTOC(t *testing.T) {
 	}
 }
 
+func TestWordCountExcludesHeadAndStyles(t *testing.T) {
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+
+	f, _ := zw.Create("mimetype")
+	f.Write([]byte("application/epub+zip"))
+
+	f, _ = zw.Create("META-INF/container.xml")
+	f.Write([]byte(`<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`))
+
+	f, _ = zw.Create("OEBPS/content.opf")
+	f.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" unique-identifier="pub-id" xmlns="http://www.idpf.org/2007/opf">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Test</dc:title></metadata>
+  <manifest>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>`))
+
+	f, _ = zw.Create("OEBPS/ch1.xhtml")
+	f.Write([]byte(`<!DOCTYPE html>
+<html>
+<head>
+  <title>Title Inside Head</title>
+  <!--[if gte mso 9]><xml><o:Author>Invisible Author</o:Author><o:Words>99999</o:Words></xml><![endif]-->
+  <style>
+    body { font-size: 16px; margin: 0; color: #333333; }
+    .nav { display: none; }
+  </style>
+  <script>
+    console.log("invisible script tokens");
+  </script>
+</head>
+<body>
+  <h1>Chapter One</h1>
+  <p>The quick brown fox jumps over the lazy dog.</p>
+</body>
+</html>`))
+
+	zw.Close()
+
+	tmpFile, err := os.CreateTemp("", "test_word_count_*.epub")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Write(buf.Bytes())
+	tmpFile.Close()
+
+	reader, err := epub.Open(tmpFile.Name())
+	if err != nil {
+		t.Fatalf("open epub: %v", err)
+	}
+	defer reader.Close()
+
+	// "Chapter One" (2 words) + "The quick brown fox jumps over the lazy dog." (9 words) = 11 words
+	chCount := reader.ChapterWordCount(0)
+	if chCount != 11 {
+		t.Errorf("expected 11 words, got %d", chCount)
+	}
+
+	totalWords, remWords, _ := reader.ReadingStats(0)
+	if totalWords != 11 || remWords != 11 {
+		t.Errorf("expected 11 total words, got total=%d, rem=%d", totalWords, remWords)
+	}
+}
+
+
 

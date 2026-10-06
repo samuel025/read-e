@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"golang.org/x/net/html"
 )
 
 type Reader struct {
@@ -917,31 +919,37 @@ func (r *Reader) augmentTOCWithHeadings() {
 }
 
 func stripHTML(s string) string {
+	if s == "" {
+		return ""
+	}
 	var b strings.Builder
-	b.Grow(len(s))
-	inTag := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == '<' {
-			inTag = true
-			continue
-		}
-		if c == '>' {
-			inTag = false
-			b.WriteByte(' ')
-			continue
-		}
-		if !inTag {
-			b.WriteByte(c)
+	z := html.NewTokenizer(strings.NewReader(s))
+	skipDepth := 0
+
+	for {
+		tt := z.Next()
+		switch tt {
+		case html.ErrorToken:
+			return strings.Join(strings.Fields(b.String()), " ")
+		case html.StartTagToken:
+			tn, _ := z.TagName()
+			tag := strings.ToLower(string(tn))
+			if tag == "head" || tag == "style" || tag == "script" || tag == "svg" || tag == "xml" {
+				skipDepth++
+			}
+		case html.EndTagToken:
+			tn, _ := z.TagName()
+			tag := strings.ToLower(string(tn))
+			if (tag == "head" || tag == "style" || tag == "script" || tag == "svg" || tag == "xml") && skipDepth > 0 {
+				skipDepth--
+			}
+		case html.TextToken:
+			if skipDepth == 0 {
+				b.Write(z.Text())
+				b.WriteByte(' ')
+			}
+		case html.CommentToken, html.DoctypeToken:
+			// ignore HTML comments and doctypes
 		}
 	}
-	res := b.String()
-	res = strings.ReplaceAll(res, "&nbsp;", " ")
-	res = strings.ReplaceAll(res, "&#160;", " ")
-	res = strings.ReplaceAll(res, "&amp;", "&")
-	res = strings.ReplaceAll(res, "&lt;", "<")
-	res = strings.ReplaceAll(res, "&gt;", ">")
-	res = strings.ReplaceAll(res, "&quot;", "\"")
-	res = strings.ReplaceAll(res, "&apos;", "'")
-	return strings.Join(strings.Fields(res), " ")
 }
