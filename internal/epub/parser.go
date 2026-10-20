@@ -922,6 +922,10 @@ func stripHTML(s string) string {
 	if s == "" {
 		return ""
 	}
+	// XHTML allows self-closing tags like <title />. The HTML tokenizer treats
+	// <title> as a raw-text element, so without normalizing it the rest of the
+	// document is swallowed as title text and the word count becomes zero.
+	s = fixSelfClosingTags(s)
 	var b strings.Builder
 	z := html.NewTokenizer(strings.NewReader(s))
 	skipDepth := 0

@@ -92,6 +92,8 @@
         src={book.coverBase64 || book.cover_base64}
         alt="{book.title} cover"
         loading="lazy"
+        decoding="async"
+        draggable="false"
       />
     {:else}
       <div class="cover-placeholder" style="background: {getGradient(book.title)}">
@@ -225,30 +227,12 @@
     border-radius: var(--radius-md);
     overflow: hidden;
     box-shadow: var(--shadow-md);
-    transform: translateZ(0);
-    will-change: transform;
     transition: transform var(--duration-normal) var(--ease-out);
-  }
-
-  /* GPU-accelerated shadow elevation — animate opacity instead of box-shadow repaint */
-  .cover-wrapper::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    box-shadow: var(--shadow-xl);
-    opacity: 0;
-    transition: opacity var(--duration-normal) var(--ease-out);
-    pointer-events: none;
   }
 
   @media (hover: hover) and (pointer: fine) {
     .book-card:hover .cover-wrapper {
-      transform: translateY(-4px) translateZ(0);
-    }
-
-    .book-card:hover .cover-wrapper::after {
-      opacity: 1;
+      transform: translateY(-4px);
     }
 
     .book-card:hover .action-btn {
@@ -283,9 +267,7 @@
     position: absolute;
     top: 8px;
     left: 8px;
-    background: rgba(15, 23, 42, 0.75);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    background: rgba(15, 23, 42, 0.88);
     color: #f8fafc;
     font-size: 0.625rem;
     font-weight: 700;
@@ -302,8 +284,6 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
     font-size: 0.6875rem;
     font-weight: 600;
     padding: 3px 8px;
@@ -312,7 +292,7 @@
   }
 
   .progress-badge {
-    background: rgba(15, 23, 42, 0.75);
+    background: rgba(15, 23, 42, 0.88);
     color: #f8fafc;
     border: 1px solid rgba(255, 255, 255, 0.15);
   }
@@ -330,8 +310,7 @@
     left: 0;
     right: 0;
     height: 4px;
-    background: rgba(0, 0, 0, 0.45);
-    backdrop-filter: blur(4px);
+    background: rgba(0, 0, 0, 0.55);
     overflow: hidden;
     z-index: 5;
   }
@@ -362,9 +341,7 @@
     height: 26px;
     border-radius: 50%;
     border: none;
-    background: rgba(0, 0, 0, 0.65);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    background: rgba(0, 0, 0, 0.8);
     color: #fff;
     display: flex;
     align-items: center;
@@ -376,7 +353,6 @@
     transition: opacity var(--duration-fast) var(--ease-out),
                 transform var(--duration-fast) var(--ease-out),
                 background var(--duration-fast) var(--ease-out);
-    will-change: opacity, transform;
   }
 
   .finish-btn:hover {

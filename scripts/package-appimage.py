@@ -16,6 +16,7 @@ SVG_ICON = os.path.join(ROOT_DIR, "build", "appicon.svg")
 DIST_DIR = os.path.join(ROOT_DIR, "dist")
 APPDIR = os.path.join(DIST_DIR, "AppDir")
 TOOL_PATH = os.path.join(DIST_DIR, "appimagetool-x86_64.AppImage")
+RUNTIME_PATH = os.path.join(DIST_DIR, "runtime-x86_64")
 
 VERSION_FILE = os.path.join(ROOT_DIR, "VERSION")
 if os.path.isfile(VERSION_FILE):
@@ -132,13 +133,23 @@ if not os.path.isfile(TOOL_PATH):
     os.chmod(TOOL_PATH, 0o755)
     print("  [+] Downloaded appimagetool successfully")
 
-# 7. Package AppImage using appimagetool
+# 7. Ensure runtime is available (appimagetool cannot follow GitHub's redirect)
+if not os.path.isfile(RUNTIME_PATH):
+    print("  [+] Downloading AppImage runtime...")
+    url = "https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64"
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req) as resp, open(RUNTIME_PATH, 'wb') as out_f:
+        shutil.copyfileobj(resp, out_f)
+    os.chmod(RUNTIME_PATH, 0o755)
+    print("  [+] Downloaded AppImage runtime successfully")
+
+# 8. Package AppImage using appimagetool
 print(f"  [+] Building AppImage...")
 env = os.environ.copy()
 env["ARCH"] = ARCH
 
 # Use --appimage-extract-and-run to ensure compatibility on systems without libfuse2 (e.g. Ubuntu 24.04+)
-cmd = [TOOL_PATH, "--appimage-extract-and-run", "-n", APPDIR, APPIMAGE_OUT]
+cmd = [TOOL_PATH, "--appimage-extract-and-run", "-n", "--runtime-file", RUNTIME_PATH, APPDIR, APPIMAGE_OUT]
 res = subprocess.run(cmd, env=env)
 
 if res.returncode != 0:

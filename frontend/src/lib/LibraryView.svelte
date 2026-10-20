@@ -733,7 +733,6 @@
     display: flex;
     background: var(--bg-primary);
     animation: viewFadeIn 160ms var(--ease-out) forwards;
-    will-change: opacity, transform;
     overflow: hidden;
   }
 
@@ -1051,8 +1050,6 @@
     padding: 0 var(--space-xl);
     border-bottom: 1px solid var(--border-subtle);
     background: var(--glass-bg);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
     --wails-draggable: drag;
     height: var(--toolbar-height);
     flex-shrink: 0;

@@ -834,10 +834,10 @@
 
           function scrollToOffsetWithRetry(offset, retries) {
             var target = Math.max(0, offset || 0);
-            window.scrollTo({ top: target, behavior: 'smooth' });
+            window.scrollTo({ top: target, behavior: 'auto' });
             if (document.documentElement) document.documentElement.scrollTop = target;
             if (document.body) document.body.scrollTop = target;
-            if ((retries || 0) < 6) {
+            if ((retries || 0) < 12) {
               setTimeout(function() {
                 var curr = window.scrollY || (document.documentElement ? document.documentElement.scrollTop : 0) || (document.body ? document.body.scrollTop : 0) || 0;
                 if (target > 10 && Math.abs(curr - target) > 30) {
@@ -1504,10 +1504,28 @@
             }
           });
 
-          if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', setupContentEnhancements);
-          } else {
+          var readySent = false;
+
+          function notifyReady() {
+            if (readySent || !window.parent) return;
+            readySent = true;
+            window.parent.postMessage({
+              type: 'iframe-ready',
+              navGen: navGen,
+              spineIndex: spineIndex
+            }, '*');
+          }
+
+          function initReader() {
             setupContentEnhancements();
+            // Allow the document to lay out before the parent restores scroll position
+            requestAnimationFrame(function() { notifyReady(); });
+          }
+
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initReader);
+          } else {
+            initReader();
           }
         })();
       </` + `script>
