@@ -84,7 +84,9 @@ func (a *App) ScanLibrary(folderPath string) ([]library.BookMeta, error) {
 		if err := a.store.UpsertBook(b); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to save book %s: %v\n", b.Title, err)
 		}
+		a.mu.Lock()
 		a.bookPaths[b.ID] = b.FilePath
+		a.mu.Unlock()
 	}
 
 	return a.store.GetBooks()
@@ -99,7 +101,9 @@ func (a *App) AddBook(filePath string) ([]library.BookMeta, error) {
 	if err := a.store.UpsertBook(meta); err != nil {
 		return nil, err
 	}
+	a.mu.Lock()
 	a.bookPaths[meta.ID] = meta.FilePath
+	a.mu.Unlock()
 
 	return a.store.GetBooks()
 }
@@ -134,8 +138,8 @@ func (a *App) RemoveBook(bookID string) error {
 		r.Close()
 	}
 	delete(a.openBooks, bookID)
-	a.mu.Unlock()
 	delete(a.bookPaths, bookID)
+	a.mu.Unlock()
 	return a.store.RemoveBook(bookID)
 }
 

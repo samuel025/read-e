@@ -688,12 +688,7 @@ func extractAttr(s string, attr string) string {
 		}
 	}
 	s = s[idx+len(search):]
-	end := strings.IndexByte(s, s[0]-1)
-	if search[len(search)-1] == '"' {
-		end = strings.IndexByte(s, '"')
-	} else {
-		end = strings.IndexByte(s, '\'')
-	}
+	end := strings.IndexByte(s, search[len(search)-1])
 	if end == -1 {
 		return ""
 	}

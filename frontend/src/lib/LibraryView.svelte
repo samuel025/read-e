@@ -135,7 +135,7 @@
       try {
         loadingTask = pdfjsLib.getDocument({
           url: `/pdf/${encodeURIComponent(book.id)}`,
-          cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+          cMapUrl: '/pdfjs/cmaps/',
           cMapPacked: true,
         });
         doc = await loadingTask.promise;
@@ -145,7 +145,7 @@
 
         loadingTask = pdfjsLib.getDocument({
           data,
-          cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+          cMapUrl: '/pdfjs/cmaps/',
           cMapPacked: true,
         });
         doc = await loadingTask.promise;
@@ -717,15 +717,11 @@
 {/if}
 
 <style>
+  /* Opacity only: compositing is disabled (see main.go), so scaling the whole
+     window would resample every pixel on each frame. */
   @keyframes viewFadeIn {
-    from {
-      opacity: 0;
-      transform: scale(0.995);
-    }
-    to {
-      opacity: 1;
-      transform: scale(1);
-    }
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
   .library-layout {
@@ -750,6 +746,13 @@
     user-select: none;
     -webkit-user-select: none;
     z-index: 10;
+  }
+
+  /* Keep contents at full width while the sidebar animates so they are
+     clipped rather than re-wrapped on every frame. */
+  .library-sidebar > * {
+    min-width: 240px;
+    box-sizing: border-box;
   }
 
   .library-sidebar.collapsed {

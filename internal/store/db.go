@@ -13,6 +13,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"epub-reader/internal/cover"
 	"epub-reader/internal/epub"
 	"epub-reader/internal/library"
 )
@@ -165,6 +166,8 @@ func (s *Store) migrate() error {
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_shelf_books_shelf ON shelf_books(shelf_id);`)
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_shelf_books_book ON shelf_books(book_id);`)
 
+	s.shrinkStoredCovers()
+
 	// Backfill any existing books with total_count <= 0
 	rows, err := s.db.Query("SELECT id, file_path, format FROM books WHERE total_count <= 0")
 	if err == nil {
@@ -202,6 +205,30 @@ func (s *Store) migrate() error {
 	return nil
 }
 
+// shrinkStoredCovers downscales covers saved at full resolution by older versions.
+// Covers that are already thumbnails are under the size threshold and skipped.
+func (s *Store) shrinkStoredCovers() {
+	rows, err := s.db.Query("SELECT id, cover_base64 FROM books WHERE length(cover_base64) > 120000")
+	if err != nil {
+		return
+	}
+	type shrunk struct{ id, cover string }
+	var updates []shrunk
+	for rows.Next() {
+		var id, c string
+		if rows.Scan(&id, &c) == nil {
+			if t := cover.Thumbnail(c); t != c {
+				updates = append(updates, shrunk{id, t})
+			}
+		}
+	}
+	rows.Close()
+
+	for _, u := range updates {
+		_, _ = s.db.Exec("UPDATE books SET cover_base64 = ? WHERE id = ?", u.cover, u.id)
+	}
+}
+
 func (s *Store) UpsertBook(b library.BookMeta) error {
 	format := b.Format
 	if format == "" {
@@ -221,12 +248,12 @@ func (s *Store) UpsertBook(b library.BookMeta) error {
 			cover_base64 = excluded.cover_base64,
 			format = excluded.format,
 			total_count = CASE WHEN excluded.total_count > 0 THEN excluded.total_count ELSE books.total_count END
-	`, b.ID, b.Title, b.Author, b.FilePath, b.CoverBase64, format, b.TotalCount, b.AddedAt)
+	`, b.ID, b.Title, b.Author, b.FilePath, cover.Thumbnail(b.CoverBase64), format, b.TotalCount, b.AddedAt)
 	return err
 }
 
 func (s *Store) UpdateBookCover(id string, coverBase64 string) error {
-	_, err := s.db.Exec("UPDATE books SET cover_base64 = ? WHERE id = ?", coverBase64, id)
+	_, err := s.db.Exec("UPDATE books SET cover_base64 = ? WHERE id = ?", cover.Thumbnail(coverBase64), id)
 	return err
 }
 
