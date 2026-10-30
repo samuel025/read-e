@@ -1499,22 +1499,6 @@
           window.addEventListener('message', function(e) {
             if (!e.data || !e.data.type) return;
 
-    if (e.data.type === 'follow-link') {
-      followLink(e.data.href);
-      return;
-    }
-
-    if (e.data.type === 'open-external') {
-      // Hand http(s) links to the system browser instead of loading them in the frame
-      try { window.runtime?.BrowserOpenURL(e.data.url); } catch (_) {}
-      return;
-    }
-
-    if (e.data.type === 'reader-activity') {
-      window.dispatchEvent(new CustomEvent('reader-activity'));
-      return;
-    }
-
             if (e.data.type === 'sync-highlights') {
               restoreHighlights(e.data.highlights || []);
             } else if (e.data.type === 'jump-to-highlight') {
@@ -1633,6 +1617,22 @@
 
   function handleWindowMessage(e) {
     if (!e.data || !e.data.type) return;
+
+    if (e.data.type === 'follow-link') {
+      followLink(e.data.href);
+      return;
+    }
+
+    if (e.data.type === 'open-external') {
+      // Hand http(s) links to the system browser instead of loading them in the frame
+      try { window.runtime?.BrowserOpenURL(e.data.url); } catch (_) {}
+      return;
+    }
+
+    if (e.data.type === 'reader-activity') {
+      window.dispatchEvent(new CustomEvent('reader-activity'));
+      return;
+    }
 
     if (e.data.type === 'iframe-ready') {
       
