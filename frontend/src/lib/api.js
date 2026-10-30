@@ -277,3 +277,9 @@ export async function setBookShelves(bookID, shelfIDs) {
 
 
 
+
+export async function resolveLink(bookID, spineIndex, href) {
+  const go = getGoBinding();
+  if (!go || !go.ResolveLink) return null;
+  return go.ResolveLink(bookID, spineIndex, href);
+}

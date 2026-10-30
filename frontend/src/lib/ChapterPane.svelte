@@ -8,7 +8,7 @@
   import {
     getChapter, saveProgress, getProgress,
     addHighlight, deleteHighlight, updateHighlightNote,
-    saveBookmark, deleteBookmark, markBookFinished
+    saveBookmark, deleteBookmark, markBookFinished, resolveLink
   } from './api.js';
   import DictionaryPopover from './DictionaryPopover.svelte';
 
@@ -927,26 +927,18 @@
               }
 
               // 4. Intercept Footnotes for In-Place Popovers
-              document.addEventListener('click', function(e) {
-                var a = e.target.closest('a');
-                if (!a) return;
-                var href = a.getAttribute('href') || '';
-                var hashIdx = href.indexOf('#');
-                if (hashIdx === -1) return;
-                var hash = href.substring(hashIdx + 1);
-                if (!hash) return;
-
+              // Scroll to / preview a fragment inside this chapter
+              function handleLocalLink(a, href, hash, e) {
                 var target = document.getElementById(hash) || document.querySelector('[name="' + CSS.escape(hash) + '"]');
                 if (!target) return;
 
                 var noteBlock = target.closest('li, p, div.calibre1, [class*="footnote" i], [class*="endnote" i]') || target;
 
                 if (isFootnoteLink(a, href)) {
-                  e.preventDefault();
-                  e.stopPropagation();
+                  if (e) { e.preventDefault(); e.stopPropagation(); }
                   showFootnotePopover(a, noteBlock);
                 } else {
-                  e.preventDefault();
+                  if (e) e.preventDefault();
                   target.scrollIntoView({ behavior: 'smooth', block: 'center' });
                   target.classList.remove('reader-target-highlight');
                   void target.offsetWidth;
@@ -955,6 +947,45 @@
                     target.classList.remove('reader-target-highlight');
                   }, 1800);
                 }
+              }
+
+              // Link clicked that points at another file (or this one by name); the
+              // parent resolves it and answers with 'local-link' or navigates.
+              var pendingLink = null;
+              window.__readerLocalLink = function(hash) {
+                if (pendingLink && hash) {
+                  handleLocalLink(pendingLink.anchor, pendingLink.href, hash, null);
+                } else {
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+                pendingLink = null;
+              };
+
+              document.addEventListener('click', function(e) {
+                var a = e.target.closest('a');
+                if (!a) return;
+                var href = a.getAttribute('href') || '';
+                if (!href || /^javascript:/i.test(href)) return;
+
+                // Never let the frame navigate away from the chapter
+                if (/^(https?:|mailto:|tel:)/i.test(href)) {
+                  e.preventDefault();
+                  if (/^https?:/i.test(href)) {
+                    window.parent.postMessage({ type: 'open-external', url: href }, '*');
+                  }
+                  return;
+                }
+
+                if (href.charAt(0) === '#') {
+                  var hash = href.substring(1);
+                  try { hash = decodeURIComponent(hash); } catch (err) {}
+                  if (hash) handleLocalLink(a, href, hash, e);
+                  return;
+                }
+
+                e.preventDefault();
+                pendingLink = { anchor: a, href: href };
+                window.parent.postMessage({ type: 'follow-link', href: href }, '*');
               });
 
               // Dismiss popover on click outside or scroll
@@ -1468,6 +1499,17 @@
           window.addEventListener('message', function(e) {
             if (!e.data || !e.data.type) return;
 
+    if (e.data.type === 'follow-link') {
+      followLink(e.data.href);
+      return;
+    }
+
+    if (e.data.type === 'open-external') {
+      // Hand http(s) links to the system browser instead of loading them in the frame
+      try { window.runtime?.BrowserOpenURL(e.data.url); } catch (_) {}
+      return;
+    }
+
     if (e.data.type === 'reader-activity') {
       window.dispatchEvent(new CustomEvent('reader-activity'));
       return;
@@ -1477,6 +1519,8 @@
               restoreHighlights(e.data.highlights || []);
             } else if (e.data.type === 'jump-to-highlight') {
               jumpToHighlightWithRetry(e.data.highlightId, e.data.text, 0);
+            } else if (e.data.type === 'local-link') {
+              if (window.__readerLocalLink) window.__readerLocalLink(e.data.hash);
             } else if (e.data.type === 'set-theme') {
               var themeEl = document.getElementById('reader-theme');
               if (themeEl) themeEl.textContent = e.data.css;
@@ -1686,6 +1730,22 @@
     }
   }
 
+
+  async function followLink(href) {
+    if (!$currentBookId || !href) return;
+    const fromSpine = $currentSpineIndex;
+    try {
+      const t = await resolveLink($currentBookId, fromSpine, href);
+      if (!t?.found || fromSpine !== $currentSpineIndex) return;
+      if (t.spineIndex === fromSpine) {
+        iframeEl?.contentWindow?.postMessage({ type: 'local-link', hash: t.hash }, '*');
+      } else {
+        handleNavigateTo({ detail: { spineIndex: t.spineIndex, hash: t.hash } });
+      }
+    } catch (err) {
+      console.error('Failed to follow link:', err);
+    }
+  }
 
   async function handleNavigateTo(e) {
     const { spineIndex, hash } = e.detail || {};

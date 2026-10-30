@@ -233,6 +233,23 @@ func (a *App) GetChapter(bookID string, spineIndex int) (string, error) {
 	return reader.ChapterHTML(spineIndex)
 }
 
+// LinkTarget is where an in-book link points.
+type LinkTarget struct {
+	Found      bool   `json:"found"`
+	SpineIndex int    `json:"spineIndex"`
+	Hash       string `json:"hash"`
+}
+
+// ResolveLink resolves an href clicked in chapter spineIndex to a spine position.
+func (a *App) ResolveLink(bookID string, spineIndex int, href string) (LinkTarget, error) {
+	reader, err := a.getReader(bookID)
+	if err != nil {
+		return LinkTarget{}, err
+	}
+	idx, hash, ok := reader.ResolveLink(spineIndex, href)
+	return LinkTarget{Found: ok, SpineIndex: idx, Hash: hash}, nil
+}
+
 func (a *App) SaveProgress(bookID string, spineIndex int, scrollOffset float64) error {
 	return a.store.SaveProgress(epub.ReadingPosition{
 		BookID:       bookID,

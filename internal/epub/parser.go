@@ -597,6 +597,47 @@ func (r *Reader) resolvePath(href string) string {
 	return r.opfDir + "/" + href
 }
 
+// ResolveLink maps an href found in chapter `from` (e.g. "../Text/ch5.xhtml#n3")
+// to the spine index it points to and its fragment. An empty file part refers
+// to the chapter itself. ok is false when the target is not a spine document.
+func (r *Reader) ResolveLink(from int, href string) (spineIndex int, fragment string, ok bool) {
+	if from < 0 || from >= len(r.spine) {
+		return 0, "", false
+	}
+	file := href
+	if i := strings.IndexByte(href, '#'); i != -1 {
+		file, fragment = href[:i], href[i+1:]
+	}
+	if dec, err := url.PathUnescape(fragment); err == nil {
+		fragment = dec
+	}
+	if file == "" {
+		return from, fragment, true
+	}
+	if dec, err := url.PathUnescape(file); err == nil {
+		file = dec
+	}
+	if q := strings.IndexByte(file, '?'); q != -1 {
+		file = file[:q]
+	}
+
+	norm := func(p string) string {
+		return strings.ToLower(path.Clean(strings.ReplaceAll(p, "\\", "/")))
+	}
+	base := path.Dir(r.resolvePath(r.spine[from].Href))
+	target := norm(path.Join(base, file))
+	for i, item := range r.spine {
+		full := r.resolvePath(item.Href)
+		if dec, err := url.PathUnescape(full); err == nil {
+			full = dec
+		}
+		if norm(full) == target {
+			return i, fragment, true
+		}
+	}
+	return 0, "", false
+}
+
 func (r *Reader) readFile(name string) ([]byte, error) {
 	name = strings.ReplaceAll(name, "\\", "/")
 	name = path.Clean(name)
