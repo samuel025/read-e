@@ -13,6 +13,9 @@
   import DictionaryPopover from './DictionaryPopover.svelte';
 
   let iframeEl;
+  let pendingHash = null;
+  let isNavigatingToStart = false;
+  let _navId = 0;
   let loading = false;
   let activeDictionary = null;
 
@@ -20,16 +23,21 @@
     const newIndex = $currentSpineIndex + delta;
     if (newIndex < 0 || ($spineCount > 0 && newIndex >= $spineCount)) return;
 
+    const navId = ++_navId;
     loading = true;
     try {
       const html = await getChapter($currentBookId, newIndex);
+      if (navId !== _navId) return; // a newer navigation superseded this one
+      pendingHash = null;
+      isNavigatingToStart = true;
+      navigationGeneration++;
       currentSpineIndex.set(newIndex);
       currentChapter.set(html);
       saveProgress($currentBookId, newIndex, 0);
     } catch (err) {
       console.error('Failed to navigate chapter:', err);
     } finally {
-      loading = false;
+      if (navId === _navId) loading = false;
     }
   }
 
@@ -63,7 +71,19 @@
   $: themeCSS = buildThemeCSS($settings);
 
   // NOTE: srcdoc does NOT depend on $highlights so highlighting does not reload the iframe!
-  $: srcdoc = buildSrcdoc($currentChapter, themeCSS, $currentBookId, $currentSpineIndex, navigationGeneration);
+  // The theme is deliberately not a dependency here: style changes are pushed into
+  // the live iframe so the chapter is not reloaded (and scroll position kept).
+  $: srcdoc = buildSrcdoc($currentChapter, $currentBookId, $currentSpineIndex, navigationGeneration);
+
+  let appliedThemeCSS = '';
+  function pushTheme() {
+    appliedThemeCSS = themeCSS;
+    iframeEl?.contentWindow?.postMessage({
+      type: 'set-theme',
+      css: themeCSS.replace(/^\s*<style[^>]*>|<\/style>\s*$/g, '')
+    }, '*');
+  }
+  $: if (themeCSS !== appliedThemeCSS) pushTheme();
 
   // Synchronize highlights to iframe whenever $highlights changes
   $: if (iframeEl?.contentWindow && $currentBookId) {
@@ -88,7 +108,7 @@
     const textAlign = s.textAlign || 'left';
 
     return `
-      <style>
+      <style id="reader-theme">
         * { box-sizing: border-box; }
         html, body {
           margin: 0;
@@ -519,8 +539,9 @@
     `;
   }
 
-  function buildSrcdoc(chapter, css, bookId, spineIndex, navGen) {
+  function buildSrcdoc(chapter, bookId, spineIndex, navGen) {
     if (!chapter) return '';
+    const css = themeCSS;
 
     // A srcdoc document does not resolve root-relative URLs against the app origin
     // in WebKitGTK, so make the image URLs served by Go (/epub/...) absolute.
@@ -961,6 +982,19 @@
                   e.preventDefault();
                   window.parent.postMessage({ type: 'toggle-bookmark-shortcut' }, '*');
                 }
+              });
+
+              // Let the parent know the user is reading (its own listeners cannot see iframe events)
+              var lastActivity = 0;
+              function reportActivity() {
+                var now = Date.now();
+                if (now - lastActivity > 5000) {
+                  lastActivity = now;
+                  window.parent.postMessage({ type: 'reader-activity' }, '*');
+                }
+              }
+              ['mousemove', 'mousedown', 'wheel', 'keydown', 'scroll', 'touchstart'].forEach(function(ev) {
+                document.addEventListener(ev, reportActivity, { passive: true, capture: true });
               });
 
               // Setup text selection toolbar
@@ -1434,10 +1468,18 @@
           window.addEventListener('message', function(e) {
             if (!e.data || !e.data.type) return;
 
+    if (e.data.type === 'reader-activity') {
+      window.dispatchEvent(new CustomEvent('reader-activity'));
+      return;
+    }
+
             if (e.data.type === 'sync-highlights') {
               restoreHighlights(e.data.highlights || []);
             } else if (e.data.type === 'jump-to-highlight') {
               jumpToHighlightWithRetry(e.data.highlightId, e.data.text, 0);
+            } else if (e.data.type === 'set-theme') {
+              var themeEl = document.getElementById('reader-theme');
+              if (themeEl) themeEl.textContent = e.data.css;
             } else if (e.data.type === 'scroll-to-offset') {
               scrollToOffsetWithRetry(e.data.offset, 0);
             } else if (e.data.type === 'scroll-to-hash') {
@@ -1586,6 +1628,8 @@
         });
       }
 
+      pushTheme();
+
       if ($currentBookId) {
         const chHighlights = $highlights.filter(h => h.bookId === $currentBookId && h.spineIndex === $currentSpineIndex);
         iframeEl?.contentWindow?.postMessage({
@@ -1642,10 +1686,6 @@
     }
   }
 
-  let pendingHash = null;
-  let isNavigatingToStart = false;
-
-  let _navId = 0;
 
   async function handleNavigateTo(e) {
     const { spineIndex, hash } = e.detail || {};
@@ -1697,7 +1737,7 @@
     } catch (err) {
       console.error(`[NAV ${navId}] Failed to load chapter:`, err);
     } finally {
-      loading = false;
+      if (navId === _navId) loading = false;
     }
   }
 
@@ -1762,17 +1802,26 @@
     return best || `Section ${spineIndex + 1}`;
   }
 
-  function updateChapterPages() {
+  // Layout metrics are cached: reading scrollHeight on every scroll event forces a
+  // synchronous layout. They are re-measured on load, resize and content changes.
+  let cachedClientHeight = 0;
+  let cachedScrollHeight = 0;
+
+  function updateChapterPages(remeasure = true) {
     if (!iframeEl?.contentWindow) return;
     const win = iframeEl.contentWindow;
     const doc = win.document;
     if (!doc || !doc.documentElement) return;
 
-    const clientHeight = iframeEl.clientHeight || win.innerHeight || 800;
-    const scrollHeight = Math.max(
-      doc.documentElement.scrollHeight || 0,
-      doc.body ? doc.body.scrollHeight : 0
-    );
+    if (remeasure || !cachedScrollHeight) {
+      cachedClientHeight = iframeEl.clientHeight || win.innerHeight || 800;
+      cachedScrollHeight = Math.max(
+        doc.documentElement.scrollHeight || 0,
+        doc.body ? doc.body.scrollHeight : 0
+      );
+    }
+    const clientHeight = cachedClientHeight;
+    const scrollHeight = cachedScrollHeight;
     const scrollTop = win.scrollY || doc.documentElement.scrollTop || 0;
 
     // Viewport height defines one screen page
@@ -1788,19 +1837,27 @@
 
     const title = getChapterTitle($currentSpineIndex);
 
-    chapterPageInfo.set({
+    const next = {
       currentPage,
       totalPages,
       pagesLeft,
       chapterTitle: title,
       percentInChapter: isAtBottom ? 100 : percentInChapter,
-    });
+    };
+    const prev = $chapterPageInfo;
+    // Skip the store write (and every subscriber update) when nothing changed.
+    if (Object.keys(next).some((k) => prev[k] !== next[k])) chapterPageInfo.set(next);
   }
 
-  function queuePageCalculation() {
+  let pendingRemeasure = false;
+  function queuePageCalculation(remeasure = true) {
+    // Event handlers pass an Event object; only an explicit false skips measuring.
+    pendingRemeasure = pendingRemeasure || remeasure !== false;
     if (pageCalcRAF) cancelAnimationFrame(pageCalcRAF);
     pageCalcRAF = requestAnimationFrame(() => {
-      updateChapterPages();
+      const r = pendingRemeasure;
+      pendingRemeasure = false;
+      updateChapterPages(r);
     });
   }
 
@@ -1809,9 +1866,13 @@
     setTimeout(queuePageCalculation, 60);
   }
 
+  let lastSavedProgress = '';
   function flushProgress() {
     if ($currentBookId && iframeEl?.contentWindow) {
       const scrollY = Math.round(iframeEl.contentWindow.scrollY || iframeEl.contentWindow.document?.documentElement?.scrollTop || 0);
+      const key = `${$currentBookId}:${$currentSpineIndex}:${scrollY}`;
+      if (key === lastSavedProgress) return; // nothing moved since the last save
+      lastSavedProgress = key;
       saveProgress($currentBookId, $currentSpineIndex, scrollY);
     }
   }
@@ -1826,7 +1887,7 @@
 
     try {
       iframeEl.contentWindow.addEventListener('scroll', () => {
-        queuePageCalculation();
+        queuePageCalculation(false);
         if (scrollDebounceTimer) clearTimeout(scrollDebounceTimer);
         scrollDebounceTimer = setTimeout(() => {
           flushProgress();

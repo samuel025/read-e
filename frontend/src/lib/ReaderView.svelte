@@ -30,6 +30,8 @@
   }
 
   onMount(() => {
+    // Activity inside the chapter iframe is relayed by ChapterPane
+    window.addEventListener('reader-activity', markActive);
     // Flush to DB every 60 seconds
     flushInterval = setInterval(async () => {
       if (activeSeconds > 0) {
@@ -52,6 +54,7 @@
     return () => {
       clearInterval(flushInterval);
       clearInterval(activeInterval);
+      window.removeEventListener('reader-activity', markActive);
     };
   });
 
