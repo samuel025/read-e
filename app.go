@@ -400,6 +400,7 @@ func (a *App) getReader(bookID string) (*epub.Reader, error) {
 		return nil, fmt.Errorf("open book: %w", err)
 	}
 
+	r.SetResourceBase("/epub/" + url.PathEscape(bookID) + "/")
 	a.openBooks[bookID] = r
 	return r, nil
 }
@@ -411,6 +412,40 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Headers", "*")
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if strings.HasPrefix(r.URL.Path, "/cover/") {
+		bookID, err := url.PathUnescape(strings.TrimPrefix(r.URL.EscapedPath(), "/cover/"))
+		if err == nil && a.store != nil {
+			if data, mime, err := a.store.GetCover(bookID); err == nil {
+				w.Header().Set("Content-Type", mime)
+				w.Header().Set("Cache-Control", "private, max-age=3600")
+				_, _ = w.Write(data)
+				return
+			}
+		}
+		http.NotFound(w, r)
+		return
+	}
+
+	if strings.HasPrefix(r.URL.Path, "/epub/") {
+		rest := strings.TrimPrefix(r.URL.EscapedPath(), "/epub/")
+		idPart, resPart, ok := strings.Cut(rest, "/")
+		bookID, err1 := url.PathUnescape(idPart)
+		resName, err2 := url.PathUnescape(resPart)
+		if ok && err1 == nil && err2 == nil {
+			if reader, err := a.getReader(bookID); err == nil {
+				if data, mime, err := reader.ReadResource(resName); err == nil {
+					w.Header().Set("Content-Type", mime)
+					// Not cached: the page cache would keep every image of a chapter in memory.
+					w.Header().Set("Cache-Control", "no-store")
+					_, _ = w.Write(data)
+					return
+				}
+			}
+		}
+		http.NotFound(w, r)
 		return
 	}
 

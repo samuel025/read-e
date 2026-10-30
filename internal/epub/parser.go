@@ -18,6 +18,8 @@ import (
 
 type Reader struct {
 	zip          *zip.ReadCloser
+	resourceBase string // when set, images are referenced by URL instead of inlined
+	files        map[string]*zip.File // lowercased, cleaned name -> entry
 	opfDir       string
 	manifest     map[string]ManifestItem
 	spine        []SpineItem
@@ -141,6 +143,13 @@ func Open(filePath string) (*Reader, error) {
 	r := &Reader{
 		zip:      zr,
 		manifest: make(map[string]ManifestItem),
+		files:    make(map[string]*zip.File, len(zr.File)),
+	}
+	for _, f := range zr.File {
+		key := strings.ToLower(path.Clean(strings.ReplaceAll(f.Name, "\\", "/")))
+		if _, dup := r.files[key]; !dup {
+			r.files[key] = f
+		}
 	}
 
 	opfPath, err := r.parseContainer()
@@ -592,18 +601,50 @@ func (r *Reader) readFile(name string) ([]byte, error) {
 	name = strings.ReplaceAll(name, "\\", "/")
 	name = path.Clean(name)
 
-	for _, f := range r.zip.File {
-		fName := path.Clean(strings.ReplaceAll(f.Name, "\\", "/"))
-		if strings.EqualFold(fName, name) {
-			rc, err := f.Open()
-			if err != nil {
-				return nil, err
+	f, ok := r.files[strings.ToLower(name)]
+	if !ok {
+		return nil, fmt.Errorf("file %q not found in epub", name)
+	}
+	rc, err := f.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	return io.ReadAll(rc)
+}
+
+// SetResourceBase makes chapter images reference base+<zip path> instead of
+// being inlined as base64, which avoids holding several copies of every image.
+func (r *Reader) SetResourceBase(base string) { r.resourceBase = base }
+
+var imageExts = map[string]string{
+	".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+	".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp",
+}
+
+// ReadResource returns an image entry and its MIME type for serving over HTTP.
+func (r *Reader) ReadResource(name string) ([]byte, string, error) {
+	mime, ok := imageExts[strings.ToLower(path.Ext(name))]
+	if !ok {
+		return nil, "", fmt.Errorf("not an image resource: %q", name)
+	}
+	data, err := r.readFile(name)
+	return data, mime, err
+}
+
+// resourceRef returns the value to put in an attribute for the zip entry
+// `resolved`, or "" when the entry does not exist.
+func (r *Reader) resourceRef(resolved string) string {
+	if r.resourceBase != "" {
+		if _, ok := imageExts[strings.ToLower(path.Ext(resolved))]; ok {
+			if _, found := r.files[strings.ToLower(path.Clean(resolved))]; found {
+				u := url.URL{Path: strings.TrimPrefix(path.Clean(resolved), "/")}
+				return r.resourceBase + u.EscapedPath()
 			}
-			defer rc.Close()
-			return io.ReadAll(rc)
+			return ""
 		}
 	}
-	return nil, fmt.Errorf("file %q not found in epub", name)
+	return r.fileToDataURI(resolved)
 }
 
 func (r *Reader) fileToDataURI(filePath string) string {
@@ -628,53 +669,44 @@ func (r *Reader) fileToDataURI(filePath string) string {
 	return "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
+var resourceAttrRegex = regexp.MustCompile(`(?i)((?:^|[\s:])(?:src|href)=)(?:"([^"]*)"|'([^']*)')`)
+
+// markupExts are navigation targets, not resources: inlining them as data URIs
+// would base64 an entire chapter into a link.
+var markupExts = map[string]bool{".xhtml": true, ".html": true, ".htm": true, ".xml": true, ".ncx": true, ".opf": true}
+
 func (r *Reader) rewriteResources(html string, chapterDir string) string {
-	html = r.rewriteAttr(html, "src", chapterDir)
-	html = r.rewriteAttr(html, "href", chapterDir)
-	return html
-}
-
-func (r *Reader) rewriteAttr(html string, attr string, chapterDir string) string {
-	search := attr + `="`
-	var result strings.Builder
-	result.Grow(len(html))
-
-	for {
-		idx := strings.Index(html, search)
-		if idx == -1 {
-			result.WriteString(html)
-			break
+	cache := make(map[string]string)
+	return resourceAttrRegex.ReplaceAllStringFunc(html, func(m string) string {
+		sub := resourceAttrRegex.FindStringSubmatch(m)
+		quote, value := `"`, sub[2]
+		if strings.HasPrefix(m[len(sub[1]):], "'") {
+			quote, value = "'", sub[3]
 		}
-
-		result.WriteString(html[:idx+len(search)])
-		html = html[idx+len(search):]
-
-		endIdx := strings.Index(html, `"`)
-		if endIdx == -1 {
-			result.WriteString(html)
-			break
-		}
-
-		value := html[:endIdx]
-		html = html[endIdx:]
-
-		if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") ||
+		if value == "" || strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") ||
 			strings.HasPrefix(value, "data:") || strings.HasPrefix(value, "#") ||
 			strings.HasPrefix(value, "mailto:") {
-			result.WriteString(value)
-			continue
+			return m
 		}
-
-		resolved := path.Clean(chapterDir + "/" + value)
-		dataURI := r.fileToDataURI(resolved)
-		if dataURI != "" {
-			result.WriteString(dataURI)
-		} else {
-			result.WriteString(value)
+		if markupExts[strings.ToLower(path.Ext(value))] {
+			return m
 		}
-	}
-
-	return result.String()
+		uri, ok := cache[value]
+		if !ok {
+			resolved := path.Clean(chapterDir + "/" + value)
+			uri = r.resourceRef(resolved)
+			if uri == "" {
+				if dec, err := url.PathUnescape(value); err == nil && dec != value {
+					uri = r.resourceRef(path.Clean(chapterDir + "/" + dec))
+				}
+			}
+			cache[value] = uri
+		}
+		if uri == "" {
+			return m
+		}
+		return sub[1] + quote + uri + quote
+	})
 }
 
 func extractAttr(s string, attr string) string {

@@ -16,6 +16,16 @@ function pdfjsAssetsPlugin() {
       outDir = path.resolve(config.root, config.build.outDir);
     },
     configureServer(server) {
+      // These routes are served by the Go asset handler. 404 them here so the dev
+      // server's SPA fallback does not answer with index.html (Wails then falls
+      // through to the Go handler).
+      server.middlewares.use((req, res, next) => {
+        if (/^\/(cover|epub|pdf)\//.test(req.url)) {
+          res.statusCode = 404;
+          return res.end();
+        }
+        next();
+      });
       server.middlewares.use('/pdfjs', (req, res, next) => {
         const rel = decodeURIComponent(req.url.split('?')[0]);
         const file = path.join(pdfjsDir, rel);

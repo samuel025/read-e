@@ -3,9 +3,11 @@ package store
 import (
 	crand "crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,7 +30,7 @@ func New(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
 
-	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_foreign_keys=on")
+	db, err := sql.Open("sqlite3", dbPath+"?_journal_mode=WAL&_foreign_keys=on&_busy_timeout=5000&_synchronous=NORMAL")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
@@ -264,7 +266,7 @@ func (s *Store) UpdateBookTotalCount(id string, totalCount int) error {
 
 func (s *Store) GetBooks() ([]library.BookMeta, error) {
 	rows, err := s.db.Query(`
-		SELECT b.id, b.title, b.author, b.file_path, b.cover_base64, b.format,
+		SELECT b.id, b.title, b.author, b.file_path, length(b.cover_base64), b.format,
 		       COALESCE(b.total_count, 0), b.added_at,
 		       COALESCE(p.spine_index, 0) as spine_index,
 		       COALESCE(p.finished, 0) as finished,
@@ -279,11 +281,17 @@ func (s *Store) GetBooks() ([]library.BookMeta, error) {
 	defer rows.Close()
 
 	var books []library.BookMeta
+	// Writes are deferred until the cursor is closed to avoid lock contention.
+	var pending []func()
 	for rows.Next() {
 		var b library.BookMeta
-		var hasProgress, finished, spineIndex, totalCount int
-		if err := rows.Scan(&b.ID, &b.Title, &b.Author, &b.FilePath, &b.CoverBase64, &b.Format, &totalCount, &b.AddedAt, &spineIndex, &finished, &hasProgress); err != nil {
+		var hasProgress, finished, spineIndex, totalCount, coverLen int
+		if err := rows.Scan(&b.ID, &b.Title, &b.Author, &b.FilePath, &coverLen, &b.Format, &totalCount, &b.AddedAt, &spineIndex, &finished, &hasProgress); err != nil {
 			return nil, err
+		}
+		// Covers are served over HTTP (/cover/{id}) instead of travelling as base64 through the bridge.
+		if coverLen > 0 {
+			b.CoverURL = fmt.Sprintf("/cover/%s?v=%d", url.PathEscape(b.ID), coverLen)
 		}
 		b.TotalCount = totalCount
 		b.HasProgress = hasProgress == 1
@@ -301,7 +309,8 @@ func (s *Store) GetBooks() ([]library.BookMeta, error) {
 				}
 			}
 			if b.TotalCount > 0 {
-				_, _ = s.db.Exec("UPDATE books SET total_count = ? WHERE id = ?", b.TotalCount, b.ID)
+				id, tc := b.ID, b.TotalCount
+				pending = append(pending, func() { _, _ = s.db.Exec("UPDATE books SET total_count = ? WHERE id = ?", tc, id) })
 			}
 		}
 
@@ -311,7 +320,8 @@ func (s *Store) GetBooks() ([]library.BookMeta, error) {
 			if b.TotalCount > 1 && b.SpineIndex >= b.TotalCount-1 {
 				b.Progress = 100.0
 				b.Finished = true
-				_, _ = s.db.Exec("UPDATE progress SET finished = 1 WHERE book_id = ?", b.ID)
+				id := b.ID
+				pending = append(pending, func() { _, _ = s.db.Exec("UPDATE progress SET finished = 1 WHERE book_id = ?", id) })
 			} else {
 				pct := float64(spineIndex+1) / float64(b.TotalCount) * 100.0
 				if pct > 100.0 {
@@ -320,7 +330,8 @@ func (s *Store) GetBooks() ([]library.BookMeta, error) {
 				b.Progress = math.Round(pct*10) / 10
 				if b.Progress >= 100.0 {
 					b.Finished = true
-					_, _ = s.db.Exec("UPDATE progress SET finished = 1 WHERE book_id = ?", b.ID)
+					id := b.ID
+					pending = append(pending, func() { _, _ = s.db.Exec("UPDATE progress SET finished = 1 WHERE book_id = ?", id) })
 				}
 			}
 		} else {
@@ -328,17 +339,24 @@ func (s *Store) GetBooks() ([]library.BookMeta, error) {
 		}
 		books = append(books, b)
 	}
-	return books, rows.Err()
+	if err := rows.Err(); err != nil {
+		return books, err
+	}
+	rows.Close()
+	for _, fn := range pending {
+		fn()
+	}
+	return books, nil
 }
 
 func (s *Store) GetBook(bookID string) (library.BookMeta, error) {
 	var b library.BookMeta
 	var totalCount int
 	err := s.db.QueryRow(`
-		SELECT id, title, author, file_path, cover_base64, format, COALESCE(total_count, 0), added_at
+		SELECT id, title, author, file_path, format, COALESCE(total_count, 0), added_at
 		FROM books
 		WHERE id = ?
-	`, bookID).Scan(&b.ID, &b.Title, &b.Author, &b.FilePath, &b.CoverBase64, &b.Format, &totalCount, &b.AddedAt)
+	`, bookID).Scan(&b.ID, &b.Title, &b.Author, &b.FilePath, &b.Format, &totalCount, &b.AddedAt)
 	b.TotalCount = totalCount
 	return b, err
 }
@@ -349,23 +367,15 @@ func (s *Store) RemoveBook(bookID string) error {
 }
 
 func (s *Store) SaveProgress(pos epub.ReadingPosition) error {
-	var totalCount int
-	_ = s.db.QueryRow("SELECT COALESCE(total_count, 0) FROM books WHERE id = ?", pos.BookID).Scan(&totalCount)
-
-	isFinished := 0
-	if totalCount > 1 && pos.SpineIndex >= totalCount-1 {
-		isFinished = 1
-	}
-
 	_, err := s.db.Exec(`
 		INSERT INTO progress (book_id, spine_index, scroll_offset, finished, updated_at)
-		VALUES (?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, COALESCE((SELECT CASE WHEN total_count > 1 AND ? >= total_count - 1 THEN 1 ELSE 0 END FROM books WHERE id = ?), 0), ?)
 		ON CONFLICT(book_id) DO UPDATE SET
 			spine_index = excluded.spine_index,
 			scroll_offset = excluded.scroll_offset,
-			finished = CASE WHEN ? = 1 THEN 1 ELSE progress.finished END,
+			finished = CASE WHEN excluded.finished = 1 THEN 1 ELSE progress.finished END,
 			updated_at = excluded.updated_at
-	`, pos.BookID, pos.SpineIndex, pos.ScrollOffset, isFinished, time.Now(), isFinished)
+	`, pos.BookID, pos.SpineIndex, pos.ScrollOffset, pos.SpineIndex, pos.BookID, time.Now())
 	return err
 }
 
@@ -500,11 +510,11 @@ type DailySession struct {
 }
 
 type ReadingInsights struct {
-	TotalHours      float64        `json:"total_hours"`
-	FinishedBooks   int            `json:"finished_books"`
-	CurrentStreak   int            `json:"current_streak"`
-	LongestStreak   int            `json:"longest_streak"`
-	DailyData       []DailySession `json:"daily_data"`
+	TotalHours    float64        `json:"total_hours"`
+	FinishedBooks int            `json:"finished_books"`
+	CurrentStreak int            `json:"current_streak"`
+	LongestStreak int            `json:"longest_streak"`
+	DailyData     []DailySession `json:"daily_data"`
 }
 
 func (s *Store) LogReadingSession(date string, durationSecs int, pagesTurned int) error {
@@ -574,7 +584,7 @@ func (s *Store) GetReadingInsights() (ReadingInsights, error) {
 		}
 		lastDate = date
 	}
-	
+
 	if len(insights.DailyData) > 0 {
 		lastSessionDate, _ := time.Parse("2006-01-02", insights.DailyData[len(insights.DailyData)-1].Date)
 		now := time.Now()
@@ -586,7 +596,7 @@ func (s *Store) GetReadingInsights() (ReadingInsights, error) {
 			currentStreak = 0
 		}
 	}
-	
+
 	insights.CurrentStreak = currentStreak
 	insights.LongestStreak = longestStreak
 
@@ -816,4 +826,20 @@ func (s *Store) SetBookShelves(bookID string, shelfIDs []string) error {
 	return tx.Commit()
 }
 
-
+// GetCover returns the decoded cover image bytes and MIME type for a book.
+func (s *Store) GetCover(bookID string) ([]byte, string, error) {
+	var uri string
+	if err := s.db.QueryRow("SELECT cover_base64 FROM books WHERE id = ?", bookID).Scan(&uri); err != nil {
+		return nil, "", err
+	}
+	comma := strings.IndexByte(uri, ',')
+	if !strings.HasPrefix(uri, "data:") || comma == -1 {
+		return nil, "", sql.ErrNoRows
+	}
+	mime := strings.TrimSuffix(strings.TrimPrefix(uri[:comma], "data:"), ";base64")
+	raw, err := base64.StdEncoding.DecodeString(uri[comma+1:])
+	if err != nil {
+		return nil, "", err
+	}
+	return raw, mime, nil
+}
