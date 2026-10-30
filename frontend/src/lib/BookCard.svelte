@@ -1,45 +1,14 @@
 <script>
   import { createEventDispatcher } from 'svelte';
-  import { openBook, getTOC, getProgress, getChapter } from './api.js';
-  import {
-    currentBook, currentBookId, currentChapter,
-    currentSpineIndex, spineCount, toc, view
-  } from '../stores/app.js';
+  import { openBookById } from './openBook.js';
 
   export let book;
   export let isCustomShelf = false;
 
   const dispatch = createEventDispatcher();
 
-  async function handleOpen() {
-    currentBookId.set(book.id);
-
-    try {
-      const info = await openBook(book.id);
-      currentBook.set(info);
-
-      if (info.format === 'pdf') {
-        view.set('reader');
-        return;
-      }
-
-      spineCount.set(info.spineCount);
-
-      const tocData = await getTOC(book.id);
-      toc.set(tocData || []);
-
-      // Restore progress
-      const progress = await getProgress(book.id);
-      const startIndex = progress?.spineIndex || 0;
-      currentSpineIndex.set(startIndex);
-
-      const html = await getChapter(book.id, startIndex);
-      currentChapter.set(html);
-
-      view.set('reader');
-    } catch (err) {
-      console.error('Failed to open book:', err);
-    }
+  function handleOpen() {
+    openBookById(book.id);
   }
 
   function handleRemove(e) {

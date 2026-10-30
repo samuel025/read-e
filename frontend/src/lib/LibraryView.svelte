@@ -1,11 +1,12 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { library, libraryLoading, settings, settingsOpen, shelves, activeShelfId } from '../stores/app.js';
   import {
     scanLibrary, addBook, selectFolder, selectFile, getLibrary, removeBook,
     getPDFData, updateBookCover, updateBookTotalCount, markBookFinished,
-    getShelves, deleteShelf, getShelfBookIDs, removeBookFromShelf
+    getShelves, deleteShelf, getShelfBookIDs, removeBookFromShelf, addBooks
   } from './api.js';
+  import { openBookById } from './openBook.js';
   import BookCard from './BookCard.svelte';
   import InsightsModal from './InsightsModal.svelte';
   import ShelfModal from './ShelfModal.svelte';
@@ -31,8 +32,71 @@
   let loadingShelfBooks = false;
 
   onMount(async () => {
+    // Files dropped onto the window (paths come from the Wails runtime)
+    window.runtime?.OnFileDrop?.((x, y, paths) => handleDroppedFiles(paths), false);
     await reloadShelves();
   });
+
+  onDestroy(() => {
+    window.runtime?.OnFileDropOff?.();
+  });
+
+  async function handleDroppedFiles(paths) {
+    if (!Array.isArray(paths) || paths.length === 0) return;
+    libraryLoading.set(true);
+    try {
+      const books = await addBooks(paths);
+      if (books && Array.isArray(books)) library.set(books);
+    } catch (e) {
+      console.error('Failed to add dropped files:', e);
+    } finally {
+      libraryLoading.set(false);
+    }
+  }
+
+  // ---- Sorting (remembered between sessions) ----
+  const SORT_OPTIONS = [
+    { id: 'added', label: 'Date added' },
+    { id: 'recent', label: 'Recently read' },
+    { id: 'title', label: 'Title' },
+    { id: 'author', label: 'Author' },
+    { id: 'progress', label: 'Progress' },
+  ];
+
+  function loadSort() {
+    try {
+      const v = localStorage.getItem('read-e.librarySort');
+      if (SORT_OPTIONS.some((o) => o.id === v)) return v;
+    } catch (_) {}
+    return 'added';
+  }
+
+  let sortBy = loadSort();
+
+  function setSort(value) {
+    sortBy = value;
+    try { localStorage.setItem('read-e.librarySort', value); } catch (_) {}
+  }
+
+  const byText = (a, b) => (a || '').localeCompare(b || '', undefined, { sensitivity: 'base', numeric: true });
+  const addedTime = (b) => (b.addedAt ? new Date(b.addedAt).getTime() : 0);
+
+  function sortBooks(books, mode) {
+    const list = [...books];
+    switch (mode) {
+      case 'recent':
+        // Opened books first (latest on top), then the rest newest-added first
+        return list.sort((a, b) => (b.lastReadAt || 0) - (a.lastReadAt || 0) || addedTime(b) - addedTime(a));
+      case 'title':
+        return list.sort((a, b) => byText(a.title, b.title));
+      case 'author':
+        return list.sort((a, b) => byText(a.author || '\uffff', b.author || '\uffff') || byText(a.title, b.title));
+      case 'progress':
+        return list.sort((a, b) => (b.progress || 0) - (a.progress || 0) || byText(a.title, b.title));
+      default:
+        return list.sort((a, b) => addedTime(b) - addedTime(a));
+    }
+  }
 
   async function reloadShelves() {
     try {
@@ -92,6 +156,15 @@
       (b.author && b.author.toLowerCase().includes(q))
     );
   });
+
+  $: sortedBooks = sortBooks(filteredBooks, sortBy);
+
+  // The last few books in progress, for quick access on the main shelf
+  $: continueBooks = (Array.isArray($library) ? $library : [])
+    .filter((b) => b.hasProgress && !b.finished && b.lastReadAt)
+    .sort((a, b) => b.lastReadAt - a.lastReadAt)
+    .slice(0, 3);
+  $: showContinue = $activeShelfId === 'all' && !searchQuery.trim() && continueBooks.length > 0;
 
   // Background PDF cover generation
   $: {
@@ -539,6 +612,18 @@
           </button>
         {/if}
 
+        <select
+          class="sort-select"
+          aria-label="Sort books"
+          title="Sort books"
+          value={sortBy}
+          on:change={(e) => setSort(e.target.value)}
+        >
+          {#each SORT_OPTIONS as o}
+            <option value={o.id}>{o.label}</option>
+          {/each}
+        </select>
+
         <div class="search-wrapper">
           <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
@@ -640,8 +725,31 @@
           {/if}
         </div>
       {:else}
+        {#if showContinue}
+          <section class="continue-strip" aria-label="Continue reading">
+            <h2 class="strip-title">Continue reading</h2>
+            <div class="strip-row">
+              {#each continueBooks as b (b.id)}
+                <button class="continue-card" on:click={() => openBookById(b.id)} title={b.title}>
+                  {#if b.coverUrl}
+                    <img class="continue-cover" src={b.coverUrl} alt="" loading="lazy" decoding="async" draggable="false" />
+                  {:else}
+                    <div class="continue-cover continue-cover-fallback">{(b.title || '?').slice(0, 1).toUpperCase()}</div>
+                  {/if}
+                  <div class="continue-info">
+                    <span class="continue-title">{b.title}</span>
+                    {#if b.author}<span class="continue-author">{b.author}</span>{/if}
+                    <div class="continue-bar"><div class="continue-bar-fill" style="transform: scaleX({Math.min(100, b.progress || 0) / 100})"></div></div>
+                    <span class="continue-pct">{Math.round(b.progress || 0)}%</span>
+                  </div>
+                </button>
+              {/each}
+            </div>
+          </section>
+        {/if}
+
         <div class="book-grid">
-          {#each filteredBooks as book (book.id)}
+          {#each sortedBooks as book (book.id)}
             <div class="stagger-item">
               <BookCard
                 {book}
@@ -1191,6 +1299,125 @@
     flex: 1;
     overflow-y: auto;
     padding: var(--space-xl);
+  }
+
+  .sort-select {
+    background: var(--bg-hover);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
+    font-size: 0.8125rem;
+    font-family: var(--font-sans);
+    color: var(--fg-primary);
+    cursor: pointer;
+  }
+
+  .sort-select:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
+  .continue-strip {
+    margin-bottom: var(--space-xl);
+  }
+
+  .strip-title {
+    margin: 0 0 var(--space-sm);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--fg-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .strip-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: var(--space-md);
+  }
+
+  .continue-card {
+    display: flex;
+    gap: var(--space-md);
+    align-items: stretch;
+    padding: var(--space-sm);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    text-align: left;
+    cursor: pointer;
+    color: inherit;
+    font-family: var(--font-sans);
+    transition: background-color var(--duration-fast) var(--ease-out),
+                border-color var(--duration-fast) var(--ease-out);
+  }
+
+  .continue-card:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-default, var(--border-subtle));
+  }
+
+  .continue-cover {
+    width: 48px;
+    height: 72px;
+    flex-shrink: 0;
+    object-fit: cover;
+    border-radius: 4px;
+    background: var(--bg-hover);
+  }
+
+  .continue-cover-fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    color: var(--fg-secondary);
+  }
+
+  .continue-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+    justify-content: center;
+  }
+
+  .continue-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--fg-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .continue-author {
+    font-size: 0.75rem;
+    color: var(--fg-tertiary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .continue-bar {
+    height: 3px;
+    margin-top: 6px;
+    background: var(--bg-active, var(--bg-hover));
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .continue-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    transform-origin: left;
+  }
+
+  .continue-pct {
+    font-size: 0.6875rem;
+    color: var(--fg-tertiary);
+    font-variant-numeric: tabular-nums;
   }
 
   .book-grid {

@@ -283,3 +283,21 @@ export async function resolveLink(bookID, spineIndex, href) {
   if (!go || !go.ResolveLink) return null;
   return go.ResolveLink(bookID, spineIndex, href);
 }
+
+export async function getPendingOpen() {
+  const go = getGoBinding();
+  if (!go || !go.GetPendingOpen) return '';
+  return go.GetPendingOpen();
+}
+
+export async function addBooks(paths) {
+  const go = getGoBinding();
+  if (!go || !go.AddBooks) return [];
+  return go.AddBooks(paths);
+}
+
+export async function getLinkPreview(bookID, spineIndex, href) {
+  const go = getGoBinding();
+  if (!go || !go.GetLinkPreview) return '';
+  return go.GetLinkPreview(bookID, spineIndex, href);
+}
