@@ -206,7 +206,7 @@ func (r *Reader) ChapterHTML(spineIndex int) (string, error) {
 		return "", fmt.Errorf("read chapter %q: %w", fullPath, err)
 	}
 
-	html := string(data)
+	html := addHeadingIDs(string(data))
 	html = fixSelfClosingTags(html)
 	html = r.rewriteResources(html, path.Dir(fullPath))
 
@@ -922,23 +922,111 @@ func (r *Reader) getChapterTitle(spineIndex int) string {
 	return fmt.Sprintf("Chapter %d", spineIndex+1)
 }
 
+// insertIntoTOC places newEntry right after the entry that precedes it in the
+// book (the one with the highest spine index below it), as that entry's sibling.
+// Nesting it under the previous entry instead made every added chapter a child of
+// the one before, producing an ever-deeper staircase. It reports false when there
+// is no preceding entry.
 func insertIntoTOC(entries []TOCEntry, newEntry TOCEntry) ([]TOCEntry, bool) {
-	for i := len(entries) - 1; i >= 0; i-- {
-		if entries[i].SpineIndex < newEntry.SpineIndex {
-			updatedChildren, inserted := insertIntoTOC(entries[i].Children, newEntry)
-			if inserted {
-				entries[i].Children = updatedChildren
-				return entries, true
+	type loc struct {
+		list  *[]TOCEntry
+		idx   int
+		spine int
+	}
+	var best *loc
+	var find func(list *[]TOCEntry)
+	find = func(list *[]TOCEntry) {
+		for i := range *list {
+			e := &(*list)[i]
+			if e.SpineIndex < newEntry.SpineIndex && (best == nil || e.SpineIndex >= best.spine) {
+				best = &loc{list, i, e.SpineIndex}
 			}
-			entries[i].Children = append(entries[i].Children, newEntry)
-			return entries, true
+			find(&e.Children)
 		}
 	}
-	return entries, false
+	find(&entries)
+	if best == nil {
+		return entries, false
+	}
+	l := *best.list
+	l = append(l, TOCEntry{})
+	copy(l[best.idx+2:], l[best.idx+1:])
+	l[best.idx+1] = newEntry
+	*best.list = l
+	return entries, true
 }
 
-var headingRegex = regexp.MustCompile(`(?i)<h[1-6][^>]*>(.*?)<\/h[1-6]>`)
+var (
+	headingOpenRegex = regexp.MustCompile(`(?i)<h([1-6])\b([^>]*)>`)
+	headingFullRegex = regexp.MustCompile(`(?is)<h([1-6])\b([^>]*)>(.*?)</h[1-6]>`)
+	idAttrRegex      = regexp.MustCompile(`(?i)\bid\s*=\s*(?:"([^"]*)"|'([^']*)')`)
+)
 
+// addHeadingIDs gives every heading an id (reader-h-N, N = its position in the
+// file) so headings can be linked from the TOC even when the book left them
+// unmarked. It must give the same result when the TOC is built and when the
+// chapter is served.
+func addHeadingIDs(html string) string {
+	n := -1
+	return headingOpenRegex.ReplaceAllStringFunc(html, func(tag string) string {
+		n++
+		m := headingOpenRegex.FindStringSubmatch(tag)
+		if idAttrRegex.MatchString(m[2]) {
+			return tag
+		}
+		return fmt.Sprintf(`<h%s id="reader-h-%d"%s>`, m[1], n, m[2])
+	})
+}
+
+type fileHeading struct{ title, id string }
+
+// fileHeadings lists the headings of a chapter that are usable as TOC entries.
+func fileHeadings(html string) []fileHeading {
+	var out []fileHeading
+	seen := map[string]bool{}
+	for _, m := range headingFullRegex.FindAllStringSubmatch(addHeadingIDs(html), -1) {
+		title := strings.Join(strings.Fields(stripHTML(m[3])), " ")
+		if title == "" || len(title) >= 80 || seen[strings.ToLower(title)] {
+			continue
+		}
+		idm := idAttrRegex.FindStringSubmatch(m[2])
+		id := ""
+		if idm != nil {
+			id = idm[1]
+			if id == "" {
+				id = idm[2]
+			}
+		}
+		if id == "" {
+			continue
+		}
+		seen[strings.ToLower(title)] = true
+		out = append(out, fileHeading{title, id})
+	}
+	return out
+}
+
+// entryForSpine finds the TOC entry that points at the start of spine item i.
+func entryForSpine(entries []TOCEntry, i int) *TOCEntry {
+	for k := range entries {
+		if entries[k].SpineIndex == i {
+			return &entries[k]
+		}
+		if e := entryForSpine(entries[k].Children, i); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
+// maxHeadingsPerFile bounds how many entries one file can add, so a heading-rich
+// file does not flood the sidebar.
+const maxHeadingsPerFile = 20
+
+// augmentTOCWithHeadings adds entries for chapters the book's own TOC misses. For
+// every spine file the TOC does not point at, its headings become entries: the
+// first heading opens the file's entry and the rest nest beneath it, so chapters
+// that share a file are still reachable.
 func (r *Reader) augmentTOCWithHeadings() {
 	covered := make(map[int]bool)
 	var walk func([]TOCEntry)
@@ -961,28 +1049,41 @@ func (r *Reader) augmentTOCWithHeadings() {
 			continue
 		}
 
-		html := string(data)
-		match := headingRegex.FindStringSubmatch(html)
-		if len(match) > 1 {
-			title := stripHTML(match[1])
-			title = strings.TrimSpace(strings.ReplaceAll(title, "\n", " "))
-			if title != "" && len(title) < 100 {
-				newEntry := TOCEntry{
-					Title:      title,
-					Href:       item.Href,
-					SpineIndex: i,
-				}
-
-				updatedTOC, inserted := insertIntoTOC(r.toc, newEntry)
-				if inserted {
-					r.toc = updatedTOC
-				} else {
-					r.toc = append([]TOCEntry{newEntry}, r.toc...)
-				}
-
-				covered[i] = true
-			}
+		heads := fileHeadings(string(data))
+		if len(heads) == 0 {
+			continue
 		}
+		if len(heads) > maxHeadingsPerFile {
+			heads = heads[:maxHeadingsPerFile]
+		}
+
+		// The book's TOC often points at a stub page just before the content with
+		// the same title; nest under that entry instead of repeating it.
+		parent := entryForSpine(r.toc, i-1)
+		if parent != nil && strings.EqualFold(parent.Title, heads[0].title) {
+			heads = heads[1:]
+		} else {
+			parent = nil
+		}
+
+		var children []TOCEntry
+		if parent == nil {
+			main := TOCEntry{Title: heads[0].title, Href: item.Href, SpineIndex: i}
+			for _, h := range heads[1:] {
+				main.Children = append(main.Children, TOCEntry{Title: h.title, Href: item.Href + "#" + h.id, SpineIndex: i})
+			}
+			if updated, inserted := insertIntoTOC(r.toc, main); inserted {
+				r.toc = updated
+			} else {
+				r.toc = append([]TOCEntry{main}, r.toc...)
+			}
+		} else {
+			for _, h := range heads {
+				children = append(children, TOCEntry{Title: h.title, Href: item.Href + "#" + h.id, SpineIndex: i})
+			}
+			parent.Children = append(parent.Children, children...)
+		}
+		covered[i] = true
 	}
 }
 
