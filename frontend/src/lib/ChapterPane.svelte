@@ -3,12 +3,12 @@
   import {
     currentChapter, currentBookId, currentSpineIndex,
     spineCount, settings, highlights, bookmarks, searchOpen,
-    toc, chapterPageInfo
+    toc, chapterPageInfo, library
   } from '../stores/app.js';
   import {
     getChapter, saveProgress, getProgress,
     addHighlight, deleteHighlight, updateHighlightNote,
-    saveBookmark, deleteBookmark
+    saveBookmark, deleteBookmark, markBookFinished
   } from './api.js';
   import DictionaryPopover from './DictionaryPopover.svelte';
 
@@ -1866,6 +1866,24 @@
     setTimeout(queuePageCalculation, 60);
   }
 
+  // Finish the book once the end of the last chapter has been reached.
+  let finishedMarkedFor = null;
+  function maybeMarkFinished() {
+    const bookId = $currentBookId;
+    if (!bookId || finishedMarkedFor === bookId) return;
+    if ($spineCount < 1 || $currentSpineIndex < $spineCount - 1) return;
+    const win = iframeEl?.contentWindow;
+    const doc = win?.document;
+    if (!win || !doc?.documentElement) return;
+    const scrollHeight = Math.max(doc.documentElement.scrollHeight || 0, doc.body?.scrollHeight || 0);
+    const scrollTop = win.scrollY || doc.documentElement.scrollTop || 0;
+    if (scrollTop + (iframeEl.clientHeight || win.innerHeight) < scrollHeight - 15) return;
+
+    finishedMarkedFor = bookId;
+    markBookFinished(bookId, true).catch(() => { finishedMarkedFor = null; });
+    library.update(lib => lib.map(b => b.id === bookId ? { ...b, finished: true, progress: 100 } : b));
+  }
+
   let lastSavedProgress = '';
   function flushProgress() {
     if ($currentBookId && iframeEl?.contentWindow) {
@@ -1888,6 +1906,7 @@
     try {
       iframeEl.contentWindow.addEventListener('scroll', () => {
         queuePageCalculation(false);
+        maybeMarkFinished();
         if (scrollDebounceTimer) clearTimeout(scrollDebounceTimer);
         scrollDebounceTimer = setTimeout(() => {
           flushProgress();
@@ -1915,6 +1934,7 @@
     }
     saveProgressTimer = setInterval(() => {
       flushProgress();
+      maybeMarkFinished(); // covers a last chapter that fits without scrolling
     }, 4000);
   }
 

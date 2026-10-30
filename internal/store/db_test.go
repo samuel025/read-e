@@ -267,11 +267,24 @@ func TestStore(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to get books: %v", err)
 		}
-		if books[0].Progress != 100.0 {
-			t.Errorf("expected progress 100.0 at last chapter, got %f", books[0].Progress)
+		// Arriving at the last chapter of an EPUB does not finish it...
+		if books[0].Progress != 99.0 {
+			t.Errorf("expected progress capped at 99.0 at last chapter, got %f", books[0].Progress)
 		}
-		if !books[0].Finished {
-			t.Errorf("expected finished to be true at last chapter")
+		if books[0].Finished {
+			t.Errorf("expected finished to be false until the end is reached")
+		}
+
+		// ...the reader marks it once the end of the last chapter is scrolled to.
+		if err := st.MarkBookFinished("book-gentle", true); err != nil {
+			t.Fatalf("failed to mark book finished: %v", err)
+		}
+		books, err = st.GetBooks()
+		if err != nil {
+			t.Fatalf("failed to get books: %v", err)
+		}
+		if !books[0].Finished || books[0].Progress != 100.0 {
+			t.Errorf("expected finished at 100%%, got finished=%v progress=%f", books[0].Finished, books[0].Progress)
 		}
 
 		// Explicitly mark unfinished
@@ -284,6 +297,15 @@ func TestStore(t *testing.T) {
 		}
 		if books[0].Finished {
 			t.Errorf("expected finished to be false after explicit unmark")
+		}
+
+		// Saving progress at the last chapter must not silently re-finish it.
+		if err := st.SaveProgress(epub.ReadingPosition{BookID: "book-gentle", SpineIndex: 36}); err != nil {
+			t.Fatalf("failed to save progress: %v", err)
+		}
+		books, _ = st.GetBooks()
+		if books[0].Finished {
+			t.Errorf("SaveProgress re-finished an unmarked EPUB")
 		}
 	})
 

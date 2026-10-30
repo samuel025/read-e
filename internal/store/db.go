@@ -325,18 +325,22 @@ func (s *Store) GetBooks() ([]library.BookMeta, error) {
 		if b.Finished {
 			b.Progress = 100.0
 		} else if b.TotalCount > 0 && b.HasProgress {
-			if b.TotalCount > 1 && b.SpineIndex >= b.TotalCount-1 {
+			isPDF := b.Format == "pdf"
+			if isPDF && b.TotalCount > 1 && b.SpineIndex >= b.TotalCount-1 {
 				b.Progress = 100.0
 				b.Finished = true
 				id := b.ID
 				pending = append(pending, func() { _, _ = s.db.Exec("UPDATE progress SET finished = 1 WHERE book_id = ?", id) })
 			} else {
 				pct := float64(spineIndex+1) / float64(b.TotalCount) * 100.0
+				if !isPDF && pct > 99.0 {
+					pct = 99.0 // not 100% until it is marked finished
+				}
 				if pct > 100.0 {
 					pct = 100.0
 				}
 				b.Progress = math.Round(pct*10) / 10
-				if b.Progress >= 100.0 {
+				if isPDF && b.Progress >= 100.0 {
 					b.Finished = true
 					id := b.ID
 					pending = append(pending, func() { _, _ = s.db.Exec("UPDATE progress SET finished = 1 WHERE book_id = ?", id) })
@@ -375,9 +379,11 @@ func (s *Store) RemoveBook(bookID string) error {
 }
 
 func (s *Store) SaveProgress(pos epub.ReadingPosition) error {
+	// EPUBs are only finished once the reader scrolls to the end of the last
+	// chapter (the UI calls MarkBookFinished); PDFs finish on reaching the last page.
 	_, err := s.db.Exec(`
 		INSERT INTO progress (book_id, spine_index, scroll_offset, finished, updated_at)
-		VALUES (?, ?, ?, COALESCE((SELECT CASE WHEN total_count > 1 AND ? >= total_count - 1 THEN 1 ELSE 0 END FROM books WHERE id = ?), 0), ?)
+		VALUES (?, ?, ?, COALESCE((SELECT CASE WHEN format = 'pdf' AND total_count > 1 AND ? >= total_count - 1 THEN 1 ELSE 0 END FROM books WHERE id = ?), 0), ?)
 		ON CONFLICT(book_id) DO UPDATE SET
 			spine_index = excluded.spine_index,
 			scroll_offset = excluded.scroll_offset,

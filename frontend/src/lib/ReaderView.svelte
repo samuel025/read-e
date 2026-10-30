@@ -68,9 +68,10 @@
     prevSpine = $currentSpineIndex;
   }
 
-  // Auto-detect finish when user reaches the last chapter/page
+  // PDFs finish on reaching the last page. EPUBs finish when ChapterPane sees the
+  // reader scroll to the end of the last chapter.
   $: {
-    if ($currentBookId && $spineCount > 1 && $currentSpineIndex !== null && $currentSpineIndex >= $spineCount - 1) {
+    if ($currentBookId && $currentBook?.format === 'pdf' && $spineCount > 1 && $currentSpineIndex !== null && $currentSpineIndex >= $spineCount - 1) {
       markBookFinished($currentBookId, true).catch(() => {});
       library.update(lib => lib.map(b => b.id === $currentBookId ? { ...b, finished: true, progress: 100 } : b));
     }
