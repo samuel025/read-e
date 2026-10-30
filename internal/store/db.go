@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -22,6 +23,10 @@ import (
 
 type Store struct {
 	db *sql.DB
+
+	// Books whose page count could not be determined this session, so
+	// GetBooks does not reopen a broken file on every library load.
+	countFailed sync.Map
 }
 
 func New(dbPath string) (*Store, error) {
@@ -299,7 +304,7 @@ func (s *Store) GetBooks() ([]library.BookMeta, error) {
 		b.SpineIndex = spineIndex
 
 		// On-the-fly resolution if total_count is still 0
-		if b.TotalCount <= 0 {
+		if _, failed := s.countFailed.Load(b.ID); b.TotalCount <= 0 && !failed {
 			if b.Format == "pdf" {
 				b.TotalCount = library.CountPDFPages(b.FilePath)
 			} else {
@@ -307,6 +312,9 @@ func (s *Store) GetBooks() ([]library.BookMeta, error) {
 					b.TotalCount = r.Info().SpineCount
 					r.Close()
 				}
+			}
+			if b.TotalCount <= 0 {
+				s.countFailed.Store(b.ID, true)
 			}
 			if b.TotalCount > 0 {
 				id, tc := b.ID, b.TotalCount

@@ -18,7 +18,7 @@ import (
 
 type Reader struct {
 	zip          *zip.ReadCloser
-	resourceBase string // when set, images are referenced by URL instead of inlined
+	resourceBase string               // when set, images are referenced by URL instead of inlined
 	files        map[string]*zip.File // lowercased, cleaned name -> entry
 	opfDir       string
 	manifest     map[string]ManifestItem
@@ -896,6 +896,8 @@ func insertIntoTOC(entries []TOCEntry, newEntry TOCEntry) ([]TOCEntry, bool) {
 	return entries, false
 }
 
+var headingRegex = regexp.MustCompile(`(?i)<h[1-6][^>]*>(.*?)<\/h[1-6]>`)
+
 func (r *Reader) augmentTOCWithHeadings() {
 	covered := make(map[int]bool)
 	var walk func([]TOCEntry)
@@ -906,8 +908,6 @@ func (r *Reader) augmentTOCWithHeadings() {
 		}
 	}
 	walk(r.toc)
-
-	headingRegex := regexp.MustCompile(`(?i)<h[1-6][^>]*>(.*?)<\/h[1-6]>`)
 
 	for i, item := range r.spine {
 		if covered[i] {
@@ -931,14 +931,14 @@ func (r *Reader) augmentTOCWithHeadings() {
 					Href:       item.Href,
 					SpineIndex: i,
 				}
-				
+
 				updatedTOC, inserted := insertIntoTOC(r.toc, newEntry)
 				if inserted {
 					r.toc = updatedTOC
 				} else {
 					r.toc = append([]TOCEntry{newEntry}, r.toc...)
 				}
-				
+
 				covered[i] = true
 			}
 		}

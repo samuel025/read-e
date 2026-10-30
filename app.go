@@ -183,10 +183,9 @@ func (a *App) SetBookShelves(bookID string, shelfIDs []string) error {
 	return a.store.SetBookShelves(bookID, shelfIDs)
 }
 
-
 func (a *App) OpenBook(bookID string) (epub.BookInfo, error) {
-	meta, err := a.store.GetBook(bookID)
-	if err == nil && meta.Format == "pdf" {
+	meta, metaErr := a.store.GetBook(bookID)
+	if metaErr == nil && meta.Format == "pdf" {
 		totalCount := meta.TotalCount
 		if totalCount <= 0 {
 			totalCount = library.CountPDFPages(meta.FilePath)
@@ -208,7 +207,7 @@ func (a *App) OpenBook(bookID string) (epub.BookInfo, error) {
 	}
 	info := reader.Info()
 	info.Format = "epub"
-	if err == nil && meta.TotalCount <= 0 && info.SpineCount > 0 {
+	if metaErr == nil && meta.TotalCount <= 0 && info.SpineCount > 0 {
 		_ = a.store.UpdateBookTotalCount(bookID, info.SpineCount)
 	}
 	return info, nil
@@ -363,19 +362,22 @@ func (a *App) SelectFile() (string, error) {
 	return file, err
 }
 
-func (a *App) GetPDFData(bookID string) ([]byte, error) {
-	meta, err := a.store.GetBook(bookID)
-	filePath := ""
-	if err == nil && meta.FilePath != "" {
-		filePath = meta.FilePath
-	} else {
-		a.mu.Lock()
-		p, ok := a.bookPaths[bookID]
-		a.mu.Unlock()
-		if ok {
-			filePath = p
-		}
+// filePathFor resolves a book's file, preferring the in-memory map over a DB query.
+func (a *App) filePathFor(bookID string) string {
+	a.mu.Lock()
+	p, ok := a.bookPaths[bookID]
+	a.mu.Unlock()
+	if ok {
+		return p
 	}
+	if meta, err := a.store.GetBook(bookID); err == nil {
+		return meta.FilePath
+	}
+	return ""
+}
+
+func (a *App) GetPDFData(bookID string) ([]byte, error) {
+	filePath := a.filePathFor(bookID)
 	if filePath == "" {
 		return nil, fmt.Errorf("book %q not found", bookID)
 	}
@@ -384,23 +386,30 @@ func (a *App) GetPDFData(bookID string) ([]byte, error) {
 
 func (a *App) getReader(bookID string) (*epub.Reader, error) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	if r, ok := a.openBooks[bookID]; ok {
+		a.mu.Unlock()
 		return r, nil
 	}
-
 	filePath, ok := a.bookPaths[bookID]
+	a.mu.Unlock()
 	if !ok {
 		return nil, fmt.Errorf("book %q not found", bookID)
 	}
 
+	// Opening parses the whole book; do it without holding the lock so other
+	// calls (progress saves, library loads) are not blocked meanwhile.
 	r, err := epub.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("open book: %w", err)
 	}
-
 	r.SetResourceBase("/epub/" + url.PathEscape(bookID) + "/")
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if existing, ok := a.openBooks[bookID]; ok {
+		r.Close()
+		return existing, nil
+	}
 	a.openBooks[bookID] = r
 	return r, nil
 }
@@ -455,20 +464,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if unescapeErr != nil {
 			bookID = rawID
 		}
-		meta, err := a.store.GetBook(bookID)
-		filePath := ""
-		if err == nil && meta.FilePath != "" {
-			filePath = meta.FilePath
-		} else {
-			a.mu.Lock()
-			p, ok := a.bookPaths[bookID]
-			a.mu.Unlock()
-			if ok {
-				filePath = p
-			}
-		}
-
-		if filePath != "" {
+		if filePath := a.filePathFor(bookID); filePath != "" {
 			if _, statErr := os.Stat(filePath); statErr == nil {
 				w.Header().Set("Content-Type", "application/pdf")
 				w.Header().Set("Accept-Ranges", "bytes")
@@ -817,4 +813,3 @@ func (a *App) LookupWord(rawWord string) (*DictionaryEntry, error) {
 
 	return entry, nil
 }
-
