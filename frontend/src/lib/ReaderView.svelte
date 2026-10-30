@@ -8,6 +8,7 @@
   import { getHighlights, getBookmarks } from './api.js';
 
   import { onMount, onDestroy } from 'svelte';
+  import { localDateKey } from './dates.js';
   import { logReadingSession, markBookFinished } from './api.js';
 
   $: if ($currentBookId) {
@@ -35,7 +36,7 @@
     // Flush to DB every 60 seconds
     flushInterval = setInterval(async () => {
       if (activeSeconds > 0) {
-        const today = new Date().toISOString().split('T')[0];
+        const today = localDateKey();
         try {
           await logReadingSession(today, activeSeconds, pagesTurned);
           activeSeconds = 0;
@@ -54,6 +55,12 @@
     return () => {
       clearInterval(flushInterval);
       clearInterval(activeInterval);
+      // Save the time since the last periodic flush instead of dropping it
+      if (activeSeconds > 0) {
+        logReadingSession(localDateKey(), activeSeconds, pagesTurned).catch(() => {});
+        activeSeconds = 0;
+        pagesTurned = 0;
+      }
       window.removeEventListener('reader-activity', markActive);
     };
   });

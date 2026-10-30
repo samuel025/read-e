@@ -1,6 +1,8 @@
 <script>
   import { createEventDispatcher, onMount } from 'svelte';
-  import { getReadingInsights } from './api.js';
+  import { getReadingInsights, saveSettings } from './api.js';
+  import { settings } from '../stores/app.js';
+  import { localDateKey } from './dates.js';
 
   const dispatch = createEventDispatcher();
   let loading = true;
@@ -37,7 +39,7 @@
     for (let i = 29; i >= 0; i--) {
       const d = new Date(today);
       d.setDate(today.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = localDateKey(d);
       const match = data.find(x => x.date === dateStr);
       days.push({
         date: dateStr,
@@ -56,6 +58,25 @@
   $: totalPages30 = last30Days.reduce((acc, d) => acc + d.pages, 0);
   $: avgMinsActiveDay = activeDaysCount > 0 ? Math.round((totalSeconds30 / 60) / activeDaysCount) : 0;
   $: maxDuration = Math.max(...last30Days.map(d => d.duration), 3600);
+
+  // ---- Daily goal ----
+  const GOAL_OPTIONS = [0, 10, 15, 20, 30, 45, 60, 90, 120];
+  const RING_CIRCUMFERENCE = 2 * Math.PI * 18;
+
+  $: goalMinutes = $settings.dailyGoalMinutes || 0;
+  $: todayMinutes = Math.floor((last30Days[last30Days.length - 1]?.duration || 0) / 60);
+  $: goalFraction = goalMinutes > 0 ? Math.min(1, todayMinutes / goalMinutes) : 0;
+  $: goalMet = goalMinutes > 0 && todayMinutes >= goalMinutes;
+  $: daysGoalMet = goalMinutes > 0 ? last30Days.filter(d => d.duration >= goalMinutes * 60).length : 0;
+
+  function setGoal(value) {
+    const minutes = parseInt(value, 10) || 0;
+    settings.update((s) => {
+      const updated = { ...s, dailyGoalMinutes: minutes };
+      saveSettings(updated);
+      return updated;
+    });
+  }
 
   function formatTime(seconds) {
     if (!seconds || seconds <= 0) return '0m';
@@ -122,6 +143,43 @@
           <p>Calculating your reading statistics...</p>
         </div>
       {:else if insights}
+        <!-- Daily reading goal -->
+        <div class="goal-card">
+          <svg class="goal-ring" width="52" height="52" viewBox="0 0 44 44" aria-hidden="true">
+            <circle cx="22" cy="22" r="18" fill="none" stroke="var(--bg-active, var(--bg-hover))" stroke-width="4" />
+            <circle
+              cx="22" cy="22" r="18" fill="none"
+              stroke={goalMet ? '#10b981' : 'var(--accent)'}
+              stroke-width="4" stroke-linecap="round"
+              stroke-dasharray={RING_CIRCUMFERENCE}
+              stroke-dashoffset={RING_CIRCUMFERENCE * (1 - goalFraction)}
+              transform="rotate(-90 22 22)"
+            />
+          </svg>
+          <div class="goal-text">
+            <span class="goal-label">Daily goal</span>
+            {#if goalMinutes > 0}
+              <span class="goal-main">{todayMinutes} of {goalMinutes} min today</span>
+              <span class="goal-sub">
+                {goalMet ? 'Goal reached' : `${goalMinutes - todayMinutes} min to go`} · met on {daysGoalMet} of the last 30 days
+              </span>
+            {:else}
+              <span class="goal-main">No goal set</span>
+              <span class="goal-sub">Pick a daily reading target to track it here</span>
+            {/if}
+          </div>
+          <select
+            class="goal-select"
+            aria-label="Daily reading goal"
+            value={goalMinutes}
+            on:change={(e) => setGoal(e.target.value)}
+          >
+            {#each GOAL_OPTIONS as m}
+              <option value={m}>{m === 0 ? 'Off' : `${m} min`}</option>
+            {/each}
+          </select>
+        </div>
+
         <!-- 4 Minimalist Stat Cards Grid -->
         <div class="stats-grid">
           <!-- Total Time -->
@@ -270,6 +328,59 @@
 </div>
 
 <style>
+  .goal-card {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-md);
+    margin-bottom: var(--space-md);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+  }
+
+  .goal-ring {
+    flex-shrink: 0;
+  }
+
+  .goal-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .goal-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--fg-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .goal-main {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--fg-primary);
+  }
+
+  .goal-sub {
+    font-size: 0.75rem;
+    color: var(--fg-tertiary);
+  }
+
+  .goal-select {
+    background: var(--bg-hover);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
+    font-size: 0.8125rem;
+    font-family: var(--font-sans);
+    color: var(--fg-primary);
+    cursor: pointer;
+  }
+
   .modal-backdrop {
     position: fixed;
     inset: 0;
