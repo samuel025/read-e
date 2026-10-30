@@ -50,13 +50,17 @@
   const MAX_CONCURRENT_RENDERS = 1;
   const PRE_RENDER_AHEAD = 1;
   const PRE_RENDER_BEHIND = 0;
-  const EVICT_BEHIND = 2;
-  const EVICT_AHEAD = 3;
+  const EVICT_BEHIND = 1;
+  const EVICT_AHEAD = 2;
+  // Upper bound on canvas pixels per page (4 bytes each); at high zoom a page
+  // would otherwise need ~50 MB.
+  const MAX_CANVAS_PIXELS = 10_000_000;
   let scrollRAF = null;
   let saveProgressTimer = null;
   let resizeObserver = null;
   let isRestoringPosition = false;
   let activeDictionary = null;
+  let destroyed = false;
 
   let selectionToolbar = {
     visible: false,
@@ -106,6 +110,26 @@
     pageTops = tops;
   }
 
+  // Pages are laid out with page 1's size until they are first rendered. When a
+  // page turns out to differ, correct its size and the offsets below it, keeping
+  // the visible content in place if the page is above the viewport.
+  function syncPageDimensions(pageIndex, width, height) {
+    const known = pageDimensions[pageIndex];
+    if (known && Math.abs(known.width - width) < 1 && Math.abs(known.height - height) < 1) return;
+
+    const active = getActivePageIndex();
+    const oldHeight = Math.floor((known?.height || height) * getScaleForPage(pageIndex));
+    // Object.assign instead of an indexed assignment: the latter would invalidate
+    // pageDimensions and re-evaluate the template for every page.
+    Object.assign(pageDimensions, { [pageIndex]: { width, height, aspectRatio: height / width } });
+    computePageTops();
+
+    if (viewportEl && pageIndex < active) {
+      const newHeight = Math.floor(height * getScaleForPage(pageIndex));
+      viewportEl.scrollTop += newHeight - oldHeight;
+    }
+  }
+
   onMount(async () => {
     if (viewportEl) {
       viewportWidth = viewportEl.clientWidth;
@@ -121,8 +145,8 @@
       resizeObserver.observe(viewportEl);
     }
 
-    await loadPDFDocument();
-
+    // Register listeners before the (slow) document load: onDestroy can run while
+    // it is still pending, and listeners added afterwards would never be removed.
     window.addEventListener('resize', handleResize, { passive: true });
     window.addEventListener('keydown', handleKeydown);
     window.addEventListener('pdf-scroll-to-page', handleScrollToPageEvent);
@@ -137,9 +161,12 @@
 
     window.addEventListener('mouseup', handleMouseUp);
     window.addEventListener('mousedown', handleMouseDown);
+
+    await loadPDFDocument();
   });
 
   onDestroy(() => {
+    destroyed = true;
     window.removeEventListener('resize', handleResize);
     window.removeEventListener('keydown', handleKeydown);
     window.removeEventListener('pdf-scroll-to-page', handleScrollToPageEvent);
@@ -223,6 +250,12 @@
         doc = await currentLoadingTask.promise;
       }
       currentLoadingTask = null;
+      if (destroyed) {
+        // The reader was closed while the document was loading.
+        try { doc.destroy(); } catch (_) {}
+        doc = null;
+        return;
+      }
       pdfDoc.set(doc);
       numPages = doc.numPages;
       spineCount.set(numPages);
@@ -341,22 +374,24 @@
     }
   }
 
-  function getTOCChapters() {
-    const list = [];
-    function traverse(items) {
-      if (!items) return;
-      for (const item of items) {
-        if (typeof item.spineIndex === 'number') {
-          list.push({ title: item.title, pageIndex: item.spineIndex });
-        }
-        if (item.children?.length) {
-          traverse(item.children);
-        }
+  function flattenChapters(items, list = []) {
+    if (!items) return list;
+    for (const item of items) {
+      if (typeof item.spineIndex === 'number') {
+        list.push({ title: item.title, pageIndex: item.spineIndex });
+      }
+      if (item.children?.length) {
+        flattenChapters(item.children, list);
       }
     }
-    traverse($toc);
-    list.sort((a, b) => a.pageIndex - b.pageIndex);
     return list;
+  }
+
+  // Rebuilt only when the TOC changes, not on every page turn.
+  $: tocChapters = flattenChapters($toc).sort((a, b) => a.pageIndex - b.pageIndex);
+
+  function getTOCChapters() {
+    return tocChapters || [];
   }
 
   function updateChapterPageInfo(pageIdx) {
@@ -595,12 +630,17 @@
     let page = null;
     try {
       page = await doc.getPage(pageNumber);
+      const base = page.getViewport({ scale: 1 });
+      syncPageDimensions(pageIndex, base.width, base.height);
       const scale = getScaleForPage(pageIndex);
-      const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
       const viewport = page.getViewport({ scale });
 
       const pw = Math.floor(viewport.width);
       const ph = Math.floor(viewport.height);
+      let dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+      if (pw * ph * dpr * dpr > MAX_CANVAS_PIXELS) {
+        dpr = Math.max(1, Math.sqrt(MAX_CANVAS_PIXELS / (pw * ph)));
+      }
 
       pageContainer.style.width = `${pw}px`;
       pageContainer.style.height = `${ph}px`;
@@ -706,7 +746,8 @@
 
   function cancelAllRenders() {
     renderQueue = [];
-    activeRenders = 0;
+    // activeRenders is not reset: in-flight renders decrement it themselves when
+    // cancelled, and zeroing it here let it go negative (unbounded concurrency).
     if (renderRAFId !== null) {
       cancelAnimationFrame(renderRAFId);
       renderRAFId = null;
@@ -747,14 +788,6 @@
 
   $: if ($pdfZoom !== undefined && doc && !loading) {
     handleZoomChanged();
-  }
-
-  $: if ($highlights && renderedPages.size > 0) {
-    for (const [pageIndex, pageData] of renderedPages) {
-      if (pageData.textLayer) {
-        applyHighlightsToPage(pageIndex, pageData.textLayer);
-      }
-    }
   }
 
   function handleZoomChanged() {

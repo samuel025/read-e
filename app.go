@@ -513,6 +513,9 @@ type DictionaryEntry struct {
 	Cached    bool           `json:"cached"`
 }
 
+// maxDictionaryResponse bounds what is read from third-party dictionary APIs.
+const maxDictionaryResponse = 2 << 20
+
 var (
 	dictHTMLTagRegex    = regexp.MustCompile(`<[^>]+>`)
 	dictHTMLStyleRegex  = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
@@ -604,6 +607,18 @@ func lookupWiktionary(word string) (*DictionaryEntry, error) {
 	apiWord := strings.ReplaceAll(word, " ", "_")
 	apiURL := fmt.Sprintf("https://en.wiktionary.org/api/rest_v1/page/definition/%s", url.PathEscape(apiWord))
 
+	// IPA and synonyms come from a separate service; fetch them while Wiktionary
+	// is being queried instead of afterwards (saves up to its 2s timeout).
+	type datamuse struct {
+		ipa  string
+		syns []string
+	}
+	extra := make(chan datamuse, 1)
+	go func() {
+		ipa, syns := fetchDatamuseInfo(word)
+		extra <- datamuse{ipa, syns}
+	}()
+
 	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		return nil, err
@@ -632,7 +647,7 @@ func lookupWiktionary(word string) (*DictionaryEntry, error) {
 		} `json:"definitions"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxDictionaryResponse)).Decode(&data); err != nil {
 		return nil, err
 	}
 
@@ -677,14 +692,13 @@ func lookupWiktionary(word string) (*DictionaryEntry, error) {
 		return nil, fmt.Errorf("no valid definitions found for '%s'", word)
 	}
 
-	// Fetch IPA and related synonyms asynchronously
-	ipa, syns := fetchDatamuseInfo(word)
-	if ipa != "" {
-		entry.Phonetic = ipa
-		entry.Phonetics = append(entry.Phonetics, PhoneticItem{Text: ipa})
+	d := <-extra
+	if d.ipa != "" {
+		entry.Phonetic = d.ipa
+		entry.Phonetics = append(entry.Phonetics, PhoneticItem{Text: d.ipa})
 	}
-	if len(syns) > 0 && len(entry.Meanings) > 0 {
-		entry.Meanings[0].Synonyms = syns
+	if len(d.syns) > 0 && len(entry.Meanings) > 0 {
+		entry.Meanings[0].Synonyms = d.syns
 	}
 
 	return entry, nil
@@ -704,7 +718,7 @@ func lookupFreeDictionaryAPI(word string) (*DictionaryEntry, error) {
 		return nil, fmt.Errorf("status %d", resp.StatusCode)
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, maxDictionaryResponse))
 	if err != nil {
 		return nil, err
 	}

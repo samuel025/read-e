@@ -1,5 +1,5 @@
 <script>
-  import { onMount, onDestroy, createEventDispatcher } from 'svelte';
+  import { onMount, onDestroy, tick, createEventDispatcher } from 'svelte';
   import { lookupWord } from './api.js';
 
   export let word = '';
@@ -25,24 +25,33 @@
     fetchDefinition(word);
   }
 
+  let lookupSeq = 0;
+
   async function fetchDefinition(w) {
     if (!w || !w.trim()) return;
+    const seq = ++lookupSeq;
     loading = true;
     error = null;
     entry = null;
 
     try {
       const res = await lookupWord(w.trim());
+      if (seq !== lookupSeq) return; // a newer search superseded this one
       if (!res) {
         error = `No definition found for "${w}"`;
       } else {
         entry = res;
       }
     } catch (err) {
+      if (seq !== lookupSeq) return;
       error = err.message || `No definition found for "${w}"`;
     } finally {
-      loading = false;
-      adjustPosition();
+      if (seq === lookupSeq) {
+        loading = false;
+        // Measure after the new content has been rendered, not the loading state
+        await tick();
+        adjustPosition();
+      }
     }
   }
 
@@ -52,6 +61,21 @@
       fetchDefinition(searchWord.trim());
     }
   }
+
+  let currentAudio = null;
+
+  function stopSpeech() {
+    if (currentAudio) {
+      currentAudio.onended = null;
+      currentAudio.onerror = null;
+      currentAudio.pause();
+      currentAudio.src = '';
+      currentAudio = null;
+    }
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+  }
+
+  onDestroy(stopSpeech);
 
   function playAudio() {
     if (isPlayingAudio) return;
@@ -66,6 +90,7 @@
     if (audioUrl) {
       isPlayingAudio = true;
       const audio = new Audio(audioUrl);
+      currentAudio = audio;
       audio.onended = () => { isPlayingAudio = false; };
       audio.onerror = () => {
         isPlayingAudio = false;
