@@ -90,15 +90,10 @@
 
 <svelte:window on:keydown={handleKeydown} />
 
-<div
-  class="modal-backdrop"
-  on:click={close}
-  role="dialog"
-  aria-modal="true"
-  aria-labelledby="insights-title"
-  tabindex="-1"
->
-  <div class="modal-box" on:click|stopPropagation role="document">
+<!-- Escape is handled on window; clicking the backdrop is a pointer shortcut for it. -->
+<!-- svelte-ignore a11y-click-events-have-key-events -->
+<div class="modal-backdrop" on:click|self={close} role="presentation">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="insights-title" tabindex="-1">
     <!-- Header -->
     <div class="modal-header">
       <div class="header-left">

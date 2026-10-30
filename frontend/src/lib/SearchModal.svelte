@@ -108,9 +108,10 @@
 
 <svelte:window on:keydown={handleKeydown} />
 
+<!-- Escape is handled on window; clicking the backdrop is a pointer shortcut for it. -->
 <!-- svelte-ignore a11y-click-events-have-key-events -->
-<div class="search-backdrop" on:click|self={() => searchOpen.set(false)} role="dialog" aria-modal="true">
-  <div class="search-modal">
+<div class="search-backdrop" on:click|self={() => searchOpen.set(false)} role="presentation">
+  <div class="search-modal" role="dialog" aria-modal="true" aria-label="Search in book">
     <div class="search-input-wrapper">
       <svg class="search-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
@@ -149,9 +150,12 @@
 
     <div class="search-results">
       {#each results as r, i}
+        <!-- Arrow keys and Enter are handled on window, so results are not tab stops. -->
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <div
           class="result-item"
+          role="button"
+          tabindex="-1"
           class:selected={i === selectedIndex}
           on:click={() => jumpToResult(r)}
           on:mouseenter={() => selectedIndex = i}

@@ -80,9 +80,10 @@
 
 <svelte:window on:keydown={handleKeydown} />
 
+<!-- Escape is handled on window; clicking the backdrop is a pointer shortcut for it. -->
 <!-- svelte-ignore a11y-click-events-have-key-events -->
-<div class="settings-backdrop" on:click={handleBackdropClick} role="dialog" aria-label="Settings">
-  <div class="settings-panel" bind:this={panelEl}>
+<div class="settings-backdrop" on:click={handleBackdropClick} role="presentation">
+  <div class="settings-panel" bind:this={panelEl} role="dialog" aria-modal="true" aria-label="Settings">
     <div class="settings-header">
       <h2>Reader Settings</h2>
       <button class="btn btn-ghost btn-icon" on:click={close} title="Close">
@@ -95,8 +96,8 @@
     <div class="settings-body">
       <!-- Theme -->
       <div class="settings-section">
-        <label class="settings-label">Theme</label>
-        <div class="theme-picker">
+        <div class="settings-label" id="settings-lbl-0">Theme</div>
+        <div class="theme-picker" role="group" aria-labelledby="settings-lbl-0">
           <button
             class="theme-btn"
             class:active={$settings.theme === 'dark'}
@@ -126,11 +127,12 @@
 
       <!-- Reading Width -->
       <div class="settings-section">
-        <label class="settings-label">
+        <label class="settings-label" for="reading-width">
           Reading Width
           <span class="settings-value">{$settings.maxWidth || 780}px</span>
         </label>
         <input
+          id="reading-width"
           type="range"
           min="560"
           max="960"
@@ -147,8 +149,8 @@
 
       <!-- Line Spacing -->
       <div class="settings-section">
-        <label class="settings-label">Line Spacing</label>
-        <div class="segmented-control">
+        <div class="settings-label" id="settings-lbl-1">Line Spacing</div>
+        <div class="segmented-control" role="group" aria-labelledby="settings-lbl-1">
           {#each lineHeightOptions as lh}
             <button
               class="seg-btn"
@@ -163,8 +165,8 @@
 
       <!-- Text Alignment -->
       <div class="settings-section">
-        <label class="settings-label">Text Alignment</label>
-        <div class="segmented-control">
+        <div class="settings-label" id="settings-lbl-2">Text Alignment</div>
+        <div class="segmented-control" role="group" aria-labelledby="settings-lbl-2">
           <button
             class="seg-btn"
             class:active={($settings.textAlign || 'left') === 'left'}
@@ -196,11 +198,12 @@
 
       <!-- Font Size -->
       <div class="settings-section">
-        <label class="settings-label">
+        <label class="settings-label" for="font-size">
           Font Size
           <span class="settings-value">{Math.round($settings.fontSize * 100)}%</span>
         </label>
         <input
+          id="font-size"
           type="range"
           min="0.6"
           max="2.0"
@@ -217,8 +220,8 @@
 
       <!-- Font Family -->
       <div class="settings-section">
-        <label class="settings-label">Font Family</label>
-        <div class="font-picker">
+        <div class="settings-label" id="settings-lbl-3">Font Family</div>
+        <div class="font-picker" role="group" aria-labelledby="settings-lbl-3">
           {#each fontOptions as font}
             <button
               class="font-btn"

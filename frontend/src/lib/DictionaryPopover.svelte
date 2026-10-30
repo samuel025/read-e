@@ -178,6 +178,8 @@
   });
 </script>
 
+<!-- Stops the outside-click handler from closing the popover when it is clicked. -->
+<!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
 <div
   class="dict-popover"
   bind:this={popoverEl}

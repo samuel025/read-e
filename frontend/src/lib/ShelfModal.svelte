@@ -67,15 +67,10 @@
 
 <svelte:window on:keydown={handleKeydown} />
 
-<div
-  class="modal-backdrop"
-  on:click={close}
-  role="dialog"
-  aria-modal="true"
-  aria-labelledby="shelf-modal-title"
-  tabindex="-1"
->
-  <div class="modal-box" on:click|stopPropagation role="document">
+<!-- Escape is handled on window; clicking the backdrop is a pointer shortcut for it. -->
+<!-- svelte-ignore a11y-click-events-have-key-events -->
+<div class="modal-backdrop" on:click|self={close} role="presentation">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="shelf-modal-title" tabindex="-1">
     <div class="modal-header">
       <div class="header-left">
         <div class="shelf-icon-badge" style="background: {color}20; color: {color};">
@@ -122,8 +117,8 @@
       </div>
 
       <div class="form-group">
-        <label>Shelf Color</label>
-        <div class="color-palette">
+        <div class="group-label" id="shelf-color-label">Shelf Color</div>
+        <div class="color-palette" role="group" aria-labelledby="shelf-color-label">
           {#each PRESET_COLORS as c}
             <button
               type="button"
@@ -276,7 +271,8 @@
     gap: var(--space-xs);
   }
 
-  .form-group label {
+  .form-group label,
+  .form-group .group-label {
     font-size: 0.8125rem;
     font-weight: 500;
     color: var(--fg-secondary);

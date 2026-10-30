@@ -186,7 +186,13 @@
     link.click();
     URL.revokeObjectURL(url);
   }
+
+  function focusOnMount(node) {
+    node.focus();
+  }
 </script>
+
+<svelte:window on:keydown={(e) => { if (e.key === 'Escape' && showExportModal) showExportModal = false; }} />
 
 <div class="highlights-panel">
   <!-- Color filter pills & Export action -->
@@ -282,7 +288,7 @@
                   bind:value={noteDraft}
                   placeholder="Add a thought or reflection..."
                   rows="2"
-                  autoFocus
+                  use:focusOnMount
                   on:keydown={(e) => {
                     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                       saveNote(e, h.id);
@@ -300,7 +306,13 @@
                 </div>
               </div>
             {:else if h.note && h.note.trim()}
-              <div class="note-display" on:click={(e) => startEditNote(e, h)} role="button" tabindex="0">
+              <div
+                class="note-display"
+                on:click={(e) => startEditNote(e, h)}
+                on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && startEditNote(e, h)}
+                role="button"
+                tabindex="0"
+              >
                 <div class="note-icon">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
@@ -328,8 +340,10 @@
 
 <!-- Export Modal -->
 {#if showExportModal}
-  <div class="modal-backdrop" on:click={() => showExportModal = false} role="dialog" aria-modal="true">
-    <div class="export-modal" on:click|stopPropagation>
+  <!-- Escape is handled by the window listener above. -->
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <div class="modal-backdrop" on:click|self={() => showExportModal = false} role="presentation">
+    <div class="export-modal" role="dialog" aria-modal="true" aria-label="Export highlights">
       <div class="modal-header">
         <div class="modal-title-wrap">
           <h3>Export Highlights</h3>

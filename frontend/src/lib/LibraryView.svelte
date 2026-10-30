@@ -694,9 +694,11 @@
 
 <!-- Delete Shelf Confirmation Dialog -->
 {#if deleteConfirmShelf}
-  <div class="modal-backdrop" on:click={() => deleteConfirmShelf = null} role="dialog" aria-modal="true" tabindex="-1">
-    <div class="confirm-dialog" on:click|stopPropagation role="document">
-      <h3>Delete Shelf?</h3>
+  <!-- Escape is handled by the window listener. -->
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <div class="modal-backdrop" on:click|self={() => deleteConfirmShelf = null} role="presentation">
+    <div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-shelf-title">
+      <h3 id="delete-shelf-title">Delete Shelf?</h3>
       <p>Are you sure you want to delete <strong>"{deleteConfirmShelf.name}"</strong>? The books on this shelf will remain in your library.</p>
       <div class="confirm-actions">
         <button class="btn btn-secondary" on:click={() => deleteConfirmShelf = null}>
@@ -711,6 +713,8 @@
 {/if}
 
 <!-- Insights Modal -->
+<svelte:window on:keydown={(e) => { if (e.key === 'Escape' && deleteConfirmShelf) deleteConfirmShelf = null; }} />
+
 {#if showInsights}
   <InsightsModal on:close={() => showInsights = false} />
 {/if}
