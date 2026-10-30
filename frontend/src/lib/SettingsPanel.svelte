@@ -240,8 +240,6 @@
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
     justify-content: flex-end;
@@ -383,7 +381,9 @@
     font-weight: 500;
     color: var(--fg-secondary);
     cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-out);
+    transition-property: background-color, color, border-color, opacity, transform;
+    transition-duration: var(--duration-fast);
+    transition-timing-function: var(--ease-out);
   }
 
   .seg-btn:hover {

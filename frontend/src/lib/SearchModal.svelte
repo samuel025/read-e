@@ -181,8 +181,6 @@
     inset: 0;
     z-index: 2000;
     background: rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
     display: flex;
     align-items: flex-start;
     justify-content: center;

@@ -279,8 +279,6 @@
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.65);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
     display: flex;
     align-items: center;
     justify-content: center;

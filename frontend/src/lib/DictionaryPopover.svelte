@@ -352,8 +352,6 @@
     border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
     border-radius: 14px;
     box-shadow: 0 18px 48px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.06);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
     z-index: 10000;
     overflow: hidden;
     animation: dictPop 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -427,7 +425,9 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.15s ease;
+    transition-property: background-color, color, border-color, opacity, transform;
+    transition-duration: 0.15s;
+    transition-timing-function: ease;
   }
 
   .dict-icon-btn:hover, .dict-close-btn:hover {
@@ -602,7 +602,9 @@
     border-radius: 4px;
     font-size: 0.75rem;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition-property: background-color, color, border-color, opacity, transform;
+    transition-duration: 0.15s;
+    transition-timing-function: ease;
   }
 
   .dict-syn-tag:hover {
@@ -639,7 +641,9 @@
     border-radius: 6px;
     font-size: 0.76rem;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition-property: background-color, color, border-color, opacity, transform;
+    transition-duration: 0.15s;
+    transition-timing-function: ease;
   }
 
   .dict-copy-btn:hover {

@@ -207,7 +207,9 @@
     border: none;
     border-radius: 4px;
     cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-out);
+    transition-property: background-color, color, border-color, opacity, transform;
+    transition-duration: var(--duration-fast);
+    transition-timing-function: var(--ease-out);
   }
 
   .tab-btn:hover {

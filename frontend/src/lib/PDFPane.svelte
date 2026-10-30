@@ -1797,8 +1797,6 @@
     border-radius: var(--radius-full);
     border: 1px solid var(--glass-border);
     background: var(--glass-bg);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
     color: var(--fg-secondary);
     display: flex;
     align-items: center;

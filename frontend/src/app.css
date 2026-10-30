@@ -252,11 +252,9 @@ body {
 @keyframes fadeInUp {
   from {
     opacity: 0;
-    transform: translateY(6px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 
@@ -272,6 +270,8 @@ body {
 .stagger-item:nth-child(5) { animation-delay: 100ms; }
 .stagger-item:nth-child(6) { animation-delay: 125ms; }
 .stagger-item:nth-child(n+7) { animation-delay: 150ms; }
+/* Only animate the first screenful; hundreds of simultaneous animations stall software rendering */
+.stagger-item:nth-child(n+13) { animation: none; opacity: 1; }
 
 /* ---- Reduced motion ---- */
 @media (prefers-reduced-motion: reduce) {

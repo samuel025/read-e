@@ -226,7 +226,7 @@
     <div class="progress-bar-container">
       <div
         class="progress-bar-fill"
-        style="width: {$spineCount > 0 ? (($currentSpineIndex + 1) / $spineCount) * 100 : 0}%"
+        style="transform: scaleX({$spineCount > 0 ? ($currentSpineIndex + 1) / $spineCount : 0})"
       ></div>
     </div>
     {#if displayTimeText}
@@ -361,8 +361,6 @@
     padding: 0 var(--space-md);
     border-bottom: 1px solid var(--border-subtle);
     background: var(--glass-bg);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
     flex-shrink: 0;
     --wails-draggable: drag;
   }
@@ -413,7 +411,10 @@
     height: 100%;
     background: var(--accent);
     border-radius: 2px;
-    transition: width var(--duration-slow) var(--ease-in-out);
+    width: 100%;
+    transform-origin: left;
+    will-change: transform;
+    transition: transform var(--duration-slow) var(--ease-in-out);
   }
 
   .reading-pill {

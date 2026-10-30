@@ -416,7 +416,9 @@
     border-radius: 12px;
     cursor: pointer;
     white-space: nowrap;
-    transition: all var(--duration-fast) var(--ease-out);
+    transition-property: background-color, color, border-color, opacity, transform;
+    transition-duration: var(--duration-fast);
+    transition-timing-function: var(--ease-out);
   }
 
   .filter-chip:hover {
@@ -444,7 +446,9 @@
     border-radius: 6px;
     cursor: pointer;
     flex-shrink: 0;
-    transition: all var(--duration-fast) var(--ease-out);
+    transition-property: background-color, color, border-color, opacity, transform;
+    transition-duration: var(--duration-fast);
+    transition-timing-function: var(--ease-out);
   }
 
   .export-btn:hover {
@@ -713,7 +717,6 @@
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -810,7 +813,9 @@
     font-weight: 500;
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: all var(--duration-fast) var(--ease-out);
+    transition-property: background-color, color, border-color, opacity, transform;
+    transition-duration: var(--duration-fast);
+    transition-timing-function: var(--ease-out);
   }
 
   .btn-download {
