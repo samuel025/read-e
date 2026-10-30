@@ -97,7 +97,7 @@
   $: {
     if (Array.isArray($library)) {
       for (const b of $library) {
-        const hasCover = !!(b.coverBase64 || b.cover_base64);
+        const hasCover = !!b.coverUrl;
         const hasTotal = (b.totalCount || 0) > 0;
         if (b.format === 'pdf' && (!hasCover || !hasTotal) && !generatingCovers.has(b.id)) {
           generatingCovers.add(b.id);
@@ -154,7 +154,7 @@
         await updateBookTotalCount(book.id, doc.numPages);
       }
 
-      let base64 = book.coverBase64 || book.cover_base64 || '';
+      let coverUrl = book.coverUrl || '';
       if (!alreadyHasCover) {
         page = await doc.getPage(1);
 
@@ -169,8 +169,8 @@
 
         await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
 
-        base64 = canvas.toDataURL('image/jpeg', 0.8);
-        await updateBookCover(book.id, base64);
+        await updateBookCover(book.id, canvas.toDataURL('image/jpeg', 0.8));
+        coverUrl = `/cover/${encodeURIComponent(book.id)}?v=${Date.now()}`;
       }
 
       library.update(lib => {
@@ -180,8 +180,7 @@
             const progress = l.finished ? 100 : (totalCount > 0 && l.hasProgress ? Math.round(((l.spineIndex || 0) + 1) / totalCount * 100) : (l.hasProgress ? 5 : 0));
             return {
               ...l,
-              coverBase64: base64,
-              cover_base64: base64,
+              coverUrl,
               totalCount,
               progress,
             };
@@ -740,8 +739,8 @@
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
-    transition: width var(--duration-normal) var(--ease-drawer),
-                margin-left var(--duration-normal) var(--ease-drawer);
+    /* No width/margin transition: it reflowed the whole book grid every frame
+       (software rendering, see main.go). */
     overflow: hidden;
     user-select: none;
     -webkit-user-select: none;
@@ -1269,8 +1268,6 @@
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
     display: flex;
     align-items: center;
     justify-content: center;

@@ -77,8 +77,8 @@
     <div class="modal-header">
       <div class="book-summary">
         <div class="book-mini-cover">
-          {#if book.coverBase64 || book.cover_base64}
-            <img src={book.coverBase64 || book.cover_base64} alt={book.title} />
+          {#if book.coverUrl}
+            <img src={book.coverUrl} alt={book.title} />
           {:else}
             <div class="mini-placeholder">
               {book.title.slice(0, 1).toUpperCase()}
@@ -166,8 +166,6 @@
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
     display: flex;
     align-items: center;
     justify-content: center;

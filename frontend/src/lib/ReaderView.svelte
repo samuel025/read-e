@@ -44,7 +44,7 @@
 
     // Track active reading time every second
     const activeInterval = setInterval(() => {
-      if ($currentBookId && Date.now() - lastActive < 120000) { // Idle after 2 mins
+      if ($currentBookId && !document.hidden && Date.now() - lastActive < 120000) { // Idle after 2 mins
         activeSeconds++;
       }
     }, 1000);

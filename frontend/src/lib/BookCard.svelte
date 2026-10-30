@@ -1,9 +1,9 @@
 <script>
   import { createEventDispatcher } from 'svelte';
-  import { openBook, getTOC, getProgress, getChapter, getHighlights } from './api.js';
+  import { openBook, getTOC, getProgress, getChapter } from './api.js';
   import {
     currentBook, currentBookId, currentChapter,
-    currentSpineIndex, spineCount, toc, view, highlights
+    currentSpineIndex, spineCount, toc, view
   } from '../stores/app.js';
 
   export let book;
@@ -19,8 +19,6 @@
       currentBook.set(info);
 
       if (info.format === 'pdf') {
-        const highlightsData = await getHighlights(book.id);
-        highlights.set(highlightsData || []);
         view.set('reader');
         return;
       }
@@ -29,9 +27,6 @@
 
       const tocData = await getTOC(book.id);
       toc.set(tocData || []);
-
-      const highlightsData = await getHighlights(book.id);
-      highlights.set(highlightsData || []);
 
       // Restore progress
       const progress = await getProgress(book.id);
@@ -86,10 +81,10 @@
   id="book-{book.id}"
 >
   <div class="cover-wrapper">
-    {#if book.coverBase64 || book.cover_base64}
+    {#if book.coverUrl}
       <img
         class="cover-img"
-        src={book.coverBase64 || book.cover_base64}
+        src={book.coverUrl}
         alt="{book.title} cover"
         loading="lazy"
         decoding="async"
@@ -132,7 +127,7 @@
         <div
           class="progress-fill"
           class:is-finished={book.finished}
-          style="width: {book.finished ? 100 : Math.max(book.progress || 0, 5)}%"
+          style="transform: scaleX({(book.finished ? 100 : Math.max(book.progress || 0, 5)) / 100})"
         ></div>
       </div>
     {/if}
@@ -318,8 +313,10 @@
   .progress-fill {
     height: 100%;
     background: linear-gradient(90deg, #6366f1, #818cf8);
-    transition: width var(--duration-normal) var(--ease-out);
+    transition: transform var(--duration-normal) var(--ease-out);
     border-radius: 0 2px 2px 0;
+    width: 100%;
+    transform-origin: left;
   }
 
   .progress-fill.is-finished {
