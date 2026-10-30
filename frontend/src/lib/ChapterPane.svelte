@@ -939,6 +939,7 @@
                   showFootnotePopover(a, noteBlock);
                 } else {
                   if (e) e.preventDefault();
+                  window.parent.postMessage({ type: 'link-jump', scrollY: Math.round(window.scrollY) }, '*');
                   target.scrollIntoView({ behavior: 'smooth', block: 'center' });
                   target.classList.remove('reader-target-highlight');
                   void target.offsetWidth;
@@ -1009,6 +1010,9 @@
                 if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
                   e.preventDefault();
                   window.parent.postMessage({ type: 'open-search-shortcut' }, '*');
+                } else if (e.altKey && e.key === 'ArrowLeft') {
+                  e.preventDefault();
+                  window.parent.postMessage({ type: 'link-back' }, '*');
                 } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
                   e.preventDefault();
                   window.parent.postMessage({ type: 'toggle-bookmark-shortcut' }, '*');
@@ -1600,6 +1604,11 @@
   }
 
   function handleKeydown(e) {
+    if (e.altKey && e.key === 'ArrowLeft') {
+      e.preventDefault();
+      goBack();
+      return;
+    }
     if (e.key === 'ArrowRight' || e.key === 'PageDown') {
       e.preventDefault();
       navigate(1);
@@ -1620,6 +1629,16 @@
 
     if (e.data.type === 'follow-link') {
       followLink(e.data.href);
+      return;
+    }
+
+    if (e.data.type === 'link-jump') {
+      pushLinkHistory(e.data.scrollY);
+      return;
+    }
+
+    if (e.data.type === 'link-back') {
+      goBack();
       return;
     }
 
@@ -1648,7 +1667,12 @@
           }, 50);
         } else if (isNavigatingToStart) {
           isNavigatingToStart = false;
-          iframeEl?.contentWindow?.postMessage({ type: 'scroll-to-top' }, '*');
+          if (pendingOffset !== null) {
+            iframeEl?.contentWindow?.postMessage({ type: 'scroll-to-offset', offset: pendingOffset }, '*');
+            pendingOffset = null;
+          } else {
+            iframeEl?.contentWindow?.postMessage({ type: 'scroll-to-top' }, '*');
+          }
           setTimeout(queuePageCalculation, 60);
         } else {
           getProgress($currentBookId).then((pos) => {
@@ -1731,12 +1755,42 @@
   }
 
 
+  // Where the reader was before following a link, so they can go back.
+  let linkHistory = [];
+  let historyBookId = null;
+  let pendingOffset = null;
+
+  $: if ($currentBookId !== historyBookId) {
+    historyBookId = $currentBookId;
+    linkHistory = [];
+  }
+
+  function pushLinkHistory(scrollY) {
+    const y = scrollY ?? Math.round(iframeEl?.contentWindow?.scrollY || 0);
+    const last = linkHistory[linkHistory.length - 1];
+    if (last && last.spineIndex === $currentSpineIndex && Math.abs(last.scrollOffset - y) < 4) return;
+    linkHistory = [...linkHistory.slice(-49), { spineIndex: $currentSpineIndex, scrollOffset: y }];
+  }
+
+  function goBack() {
+    const entry = linkHistory[linkHistory.length - 1];
+    if (!entry) return;
+    linkHistory = linkHistory.slice(0, -1);
+    if (entry.spineIndex === $currentSpineIndex) {
+      iframeEl?.contentWindow?.postMessage({ type: 'scroll-to-offset', offset: entry.scrollOffset }, '*');
+    } else {
+      pendingOffset = entry.scrollOffset;
+      handleNavigateTo({ detail: { spineIndex: entry.spineIndex } });
+    }
+  }
+
   async function followLink(href) {
     if (!$currentBookId || !href) return;
     const fromSpine = $currentSpineIndex;
     try {
       const t = await resolveLink($currentBookId, fromSpine, href);
       if (!t?.found || fromSpine !== $currentSpineIndex) return;
+      pushLinkHistory();
       if (t.spineIndex === fromSpine) {
         iframeEl?.contentWindow?.postMessage({ type: 'local-link', hash: t.hash }, '*');
       } else {
@@ -2042,6 +2096,15 @@
     on:load={handleIframeLoad}
   ></iframe>
 
+  {#if linkHistory.length > 0}
+    <button class="back-btn" on:click={goBack} title="Back to where you were (Alt+←)">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19 12H5"/><path d="m12 19-7-7 7-7"/>
+      </svg>
+      Back
+    </button>
+  {/if}
+
   <!-- Chapter nav buttons -->
   <div class="chapter-nav">
     <button
@@ -2115,6 +2178,33 @@
 
   @keyframes spin {
     to { transform: rotate(360deg); }
+  }
+
+  .back-btn {
+    position: absolute;
+    top: 12px;
+    left: 16px;
+    z-index: 6;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px 6px 10px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    color: var(--fg-secondary);
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    box-shadow: var(--shadow-md);
+    transition: color var(--duration-fast) var(--ease-out),
+                background-color var(--duration-fast) var(--ease-out);
+  }
+
+  .back-btn:hover {
+    color: var(--fg-primary);
+    background: var(--bg-hover);
   }
 
   .chapter-nav {
