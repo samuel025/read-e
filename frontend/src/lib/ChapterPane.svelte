@@ -1814,6 +1814,164 @@
     }
   }
 
+  // ---- Read aloud (browser speech synthesis; no extra dependencies) ----
+  let ttsState = 'idle'; // 'idle' | 'playing' | 'paused'
+  let ttsMessage = '';
+  let ttsQueue = [];
+  let ttsIndex = 0;
+  let ttsToken = 0;
+  let ttsCurrentEl = null;
+  let ttsMessageTimer = null;
+  let ttsStartTimer = null;
+
+  function showTtsMessage(text) {
+    ttsMessage = text;
+    clearTimeout(ttsMessageTimer);
+    ttsMessageTimer = setTimeout(() => { ttsMessage = ''; }, 7000);
+  }
+
+  function clearTtsHighlight() {
+    if (ttsCurrentEl) {
+      try {
+        ttsCurrentEl.style.backgroundColor = '';
+        ttsCurrentEl.style.borderRadius = '';
+      } catch (_) {}
+      ttsCurrentEl = null;
+    }
+  }
+
+  // Break text into sentence-sized chunks: long utterances are cut off by some engines
+  function chunkText(text, max = 220) {
+    const parts = text.match(/[^.!?…]+[.!?…]+["”’)\]]*\s*|[^.!?…]+$/g) || [text];
+    const chunks = [];
+    let cur = '';
+    for (const part of parts) {
+      if (cur && (cur + part).length > max) {
+        chunks.push(cur.trim());
+        cur = '';
+      }
+      cur += part;
+      while (cur.length > max * 1.5) {
+        const cut = cur.lastIndexOf(' ', max);
+        const at = cut > 0 ? cut : max;
+        chunks.push(cur.slice(0, at).trim());
+        cur = cur.slice(at);
+      }
+    }
+    if (cur.trim()) chunks.push(cur.trim());
+    return chunks;
+  }
+
+  function buildTtsQueue() {
+    const doc = iframeEl?.contentDocument;
+    if (!doc?.body) return [];
+    const blocks = Array.from(doc.body.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote, dd, figcaption'))
+      .filter((el) => !el.closest('.reader-footnote-popover') && !el.querySelector('p, li, blockquote, h1, h2, h3, h4, h5, h6'));
+    // Begin at the first block that is on screen
+    let start = blocks.findIndex((el) => el.getBoundingClientRect().bottom > 40);
+    if (start < 0) start = 0;
+    const queue = [];
+    for (const el of blocks.slice(start)) {
+      const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      for (const chunk of chunkText(text)) queue.push({ el, text: chunk });
+    }
+    return queue;
+  }
+
+  function speakNext(token) {
+    if (token !== ttsToken) return;
+    if (ttsIndex >= ttsQueue.length) {
+      stopTts();
+      return;
+    }
+    const item = ttsQueue[ttsIndex];
+    const utterance = new SpeechSynthesisUtterance(item.text);
+    utterance.onstart = () => {
+      if (token !== ttsToken) return;
+      clearTimeout(ttsStartTimer);
+      if (item.el !== ttsCurrentEl) {
+        clearTtsHighlight();
+        ttsCurrentEl = item.el;
+        try {
+          item.el.style.backgroundColor = 'rgba(129, 140, 248, 0.22)';
+          item.el.style.borderRadius = '4px';
+          const r = item.el.getBoundingClientRect();
+          const h = iframeEl?.clientHeight || 600;
+          if (r.top < 0 || r.bottom > h) item.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } catch (_) {}
+      }
+    };
+    utterance.onend = () => {
+      if (token !== ttsToken) return;
+      ttsIndex++;
+      speakNext(token);
+    };
+    utterance.onerror = (e) => {
+      if (token !== ttsToken) return;
+      if (e.error === 'canceled' || e.error === 'interrupted') return;
+      stopTts();
+      showTtsMessage('Read aloud failed: the speech engine reported an error.');
+    };
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function startTtsFrom(index) {
+    const token = ++ttsToken;
+    ttsIndex = index;
+    ttsState = 'playing';
+    window.speechSynthesis.cancel();
+    // If nothing starts speaking, no voice is installed
+    clearTimeout(ttsStartTimer);
+    ttsStartTimer = setTimeout(() => {
+      if (token === ttsToken && ttsState === 'playing' && !ttsCurrentEl) {
+        stopTts();
+        showTtsMessage('No speech voice found. Install one (e.g. sudo apt install speech-dispatcher espeak-ng) and restart.');
+      }
+    }, 3000);
+    speakNext(token);
+  }
+
+  function stopTts() {
+    ttsToken++;
+    clearTimeout(ttsStartTimer);
+    try { window.speechSynthesis?.cancel(); } catch (_) {}
+    clearTtsHighlight();
+    ttsQueue = [];
+    ttsIndex = 0;
+    ttsState = 'idle';
+  }
+
+  function toggleTts() {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
+      showTtsMessage('Read aloud is not available on this system.');
+      return;
+    }
+    if (ttsState === 'playing') {
+      // Pause = stop speaking but remember the place (engine-level pause is unreliable)
+      ttsToken++;
+      window.speechSynthesis.cancel();
+      ttsState = 'paused';
+    } else if (ttsState === 'paused') {
+      startTtsFrom(ttsIndex);
+    } else {
+      ttsQueue = buildTtsQueue();
+      if (ttsQueue.length === 0) {
+        showTtsMessage('Nothing to read here.');
+        return;
+      }
+      startTtsFrom(0);
+    }
+  }
+
+  // A different chapter was loaded: its text is no longer what was being read
+  $: $currentSpineIndex, stopTts();
+
+  onDestroy(() => {
+    stopTts();
+    clearTimeout(ttsMessageTimer);
+  });
+
   // Show a note's text in a popover; fall back to navigating if it has none.
   async function previewLink(href) {
     if (!$currentBookId || !href) return;
@@ -2152,8 +2310,30 @@
     </button>
   {/if}
 
+  {#if ttsMessage}
+    <div class="tts-message" role="status">{ttsMessage}</div>
+  {/if}
+
   <!-- Chapter nav buttons -->
   <div class="chapter-nav">
+    {#if ttsState !== 'idle'}
+      <button class="nav-btn" on:click={stopTts} title="Stop reading aloud" id="tts-stop-btn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
+      </button>
+    {/if}
+    <button
+      class="nav-btn"
+      class:tts-active={ttsState !== 'idle'}
+      on:click={toggleTts}
+      title={ttsState === 'playing' ? 'Pause reading aloud' : ttsState === 'paused' ? 'Resume reading aloud' : 'Read aloud from here'}
+      id="tts-btn"
+    >
+      {#if ttsState === 'playing'}
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+      {:else}
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+      {/if}
+    </button>
     <button
       class="nav-btn prev"
       class:disabled={$currentSpineIndex <= 0}
@@ -2290,6 +2470,27 @@
 
   .nav-btn:active:not(.disabled) {
     transform: scale(0.95);
+  }
+
+  .nav-btn.tts-active {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .tts-message {
+    position: absolute;
+    right: 24px;
+    bottom: 76px;
+    max-width: 320px;
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    color: var(--fg-secondary);
+    font-size: 0.8125rem;
+    line-height: 1.4;
+    box-shadow: var(--shadow-md);
+    z-index: 6;
   }
 
   .nav-btn.disabled {
