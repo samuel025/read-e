@@ -177,7 +177,7 @@
 
   async function cycleTheme() {
     settings.update((s) => {
-      const themes = ['dark', 'light', 'sepia'];
+      const themes = ['dark', 'light', 'sepia', 'auto'];
       const idx = themes.indexOf(s.theme);
       const next = themes[(idx + 1) % themes.length];
       const updated = { ...s, theme: next };
@@ -330,6 +330,12 @@
           <line x1="21" y1="12" x2="23" y2="12"></line>
           <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
           <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+      {:else if $settings.theme === 'auto'}
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"></circle>
+          <path d="M12 3v18" fill="none"></path>
+          <path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"></path>
         </svg>
       {:else if $settings.theme === 'sepia'}
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

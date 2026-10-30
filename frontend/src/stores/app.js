@@ -1,4 +1,4 @@
-import { writable } from 'svelte/store';
+import { writable, derived } from 'svelte/store';
 
 // ---- Library ----
 export const library = writable([]);
@@ -43,8 +43,27 @@ export const settings = writable({
   textAlign: 'left',
 });
 
-settings.subscribe((s) => {
-  if (typeof document !== 'undefined' && s?.theme) {
-    document.documentElement.setAttribute('data-theme', s.theme);
+// ---- Theme ----
+// 'auto' follows the operating system's light/dark preference.
+export const systemDark = writable(true);
+
+if (typeof window !== 'undefined' && window.matchMedia) {
+  const query = window.matchMedia('(prefers-color-scheme: dark)');
+  systemDark.set(query.matches);
+  const onChange = (e) => systemDark.set(e.matches);
+  if (query.addEventListener) query.addEventListener('change', onChange);
+  else if (query.addListener) query.addListener(onChange);
+}
+
+export function resolveTheme(theme, dark) {
+  return theme === 'auto' ? (dark ? 'dark' : 'light') : theme;
+}
+
+// The theme actually applied (never 'auto')
+export const activeTheme = derived([settings, systemDark], ([$s, $dark]) => resolveTheme($s?.theme || 'dark', $dark));
+
+activeTheme.subscribe((theme) => {
+  if (typeof document !== 'undefined' && theme) {
+    document.documentElement.setAttribute('data-theme', theme);
   }
 });

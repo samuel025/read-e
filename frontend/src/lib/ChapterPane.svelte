@@ -3,7 +3,7 @@
   import {
     currentChapter, currentBookId, currentSpineIndex,
     spineCount, settings, highlights, bookmarks, searchOpen,
-    toc, chapterPageInfo, library
+    toc, chapterPageInfo, library, activeTheme
   } from '../stores/app.js';
   import {
     getChapter, saveProgress, getProgress,
@@ -68,7 +68,7 @@
   let navigationGeneration = 0;
   let handledNavigationGeneration = -1;
 
-  $: themeCSS = buildThemeCSS($settings);
+  $: themeCSS = buildThemeCSS($settings, $activeTheme);
 
   // NOTE: srcdoc does NOT depend on $highlights so highlighting does not reload the iframe!
   // The theme is deliberately not a dependency here: style changes are pushed into
@@ -94,15 +94,15 @@
     }, '*');
   }
 
-  function buildThemeCSS(s) {
+  function buildThemeCSS(s, theme) {
     const themes = {
       dark: { bg: '#0f1117', fg: '#e0e2e8', link: '#818cf8', highlight: 'rgba(129, 140, 248, 0.28)' },
       light: { bg: '#ffffff', fg: '#1a1d26', link: '#6366f1', highlight: 'rgba(99, 102, 241, 0.25)' },
       sepia: { bg: '#f5f0e8', fg: '#3d2e1c', link: '#a0522d', highlight: 'rgba(160, 82, 45, 0.22)' },
       nord: { bg: '#2e3440', fg: '#eceff4', link: '#88c0d0', highlight: 'rgba(136, 192, 208, 0.28)' },
     };
-    const t = themes[s.theme] || themes.dark;
-    const isDark = s.theme === 'dark' || s.theme === 'nord';
+    const t = themes[theme] || themes.dark;
+    const isDark = theme === 'dark' || theme === 'nord';
     const maxWidth = s.maxWidth || 780;
     const lineHeight = s.lineHeight || 1.7;
     const textAlign = s.textAlign || 'left';

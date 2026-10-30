@@ -122,6 +122,15 @@
             <div class="theme-preview sepia-preview"></div>
             <span>Sepia</span>
           </button>
+          <button
+            class="theme-btn"
+            class:active={$settings.theme === 'auto'}
+            on:click={() => setTheme('auto')}
+            title="Match the system light/dark setting"
+          >
+            <div class="theme-preview auto-preview"></div>
+            <span>Auto</span>
+          </button>
         </div>
       </div>
 
@@ -323,7 +332,7 @@
   /* Theme picker */
   .theme-picker {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: var(--space-sm);
   }
 
@@ -358,6 +367,7 @@
   }
 
   .dark-preview { background: linear-gradient(135deg, #0f1117, #1c2030); }
+  .auto-preview { background: linear-gradient(135deg, #0f1117 50%, #ffffff 50%); }
   .light-preview { background: linear-gradient(135deg, #ffffff, #f1f3f5); }
   .sepia-preview { background: linear-gradient(135deg, #f5f0e8, #e8dece); }
 
