@@ -8,7 +8,7 @@
   import {
     getChapter, saveProgress, getProgress,
     addHighlight, deleteHighlight, updateHighlightNote,
-    saveBookmark, deleteBookmark, markBookFinished, resolveLink
+    saveBookmark, deleteBookmark, markBookFinished, resolveLink, getLinkPreview
   } from './api.js';
   import DictionaryPopover from './DictionaryPopover.svelte';
 
@@ -596,7 +596,19 @@
             return false;
           }
 
-          function showFootnotePopover(anchor, targetEl) {
+          // Preview of a note that lives in another file; its text comes from the parent
+          function showRemoteFootnote(anchor, href, text) {
+            var el = document.createElement('div');
+            String(text).split('\\n\\n').forEach(function(part) {
+              if (!part) return;
+              var p = document.createElement('p');
+              p.textContent = part;
+              el.appendChild(p);
+            });
+            showFootnotePopover(anchor, el, href);
+          }
+
+          function showFootnotePopover(anchor, targetEl, remoteHref) {
             removeFootnotePopover();
             removeMenu();
             removeNoteBox();
@@ -623,7 +635,7 @@
               '</div>',
               '<div class="reader-footnote-body">' + noteHtml + '</div>',
               '<div class="reader-footnote-footer">',
-              '  <a href="#" class="reader-footnote-jump">Jump to endnote ↓</a>',
+              '  <a href="#" class="reader-footnote-jump">' + (remoteHref ? 'Go to note →' : 'Jump to endnote ↓') + '</a>',
               '</div>'
             ].join('');
 
@@ -636,6 +648,10 @@
               e.preventDefault();
               e.stopPropagation();
               removeFootnotePopover();
+              if (remoteHref) {
+                window.parent.postMessage({ type: 'follow-link', href: remoteHref }, '*');
+                return;
+              }
               targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
               targetEl.classList.remove('reader-target-highlight');
               void targetEl.offsetWidth;
@@ -986,8 +1002,15 @@
 
                 e.preventDefault();
                 pendingLink = { anchor: a, href: href };
-                window.parent.postMessage({ type: 'follow-link', href: href }, '*');
+                // Note markers show a preview in place; other links navigate
+                window.parent.postMessage({ type: isFootnoteLink(a, href) ? 'preview-link' : 'follow-link', href: href }, '*');
               });
+
+              window.__readerShowPreview = function(href, text) {
+                if (pendingLink && pendingLink.href === href && text) {
+                  showRemoteFootnote(pendingLink.anchor, href, text);
+                }
+              };
 
               // Dismiss popover on click outside or scroll
               document.addEventListener('mousedown', function(e) {
@@ -1507,6 +1530,8 @@
               restoreHighlights(e.data.highlights || []);
             } else if (e.data.type === 'jump-to-highlight') {
               jumpToHighlightWithRetry(e.data.highlightId, e.data.text, 0);
+            } else if (e.data.type === 'link-preview') {
+              if (window.__readerShowPreview) window.__readerShowPreview(e.data.href, e.data.text);
             } else if (e.data.type === 'local-link') {
               if (window.__readerLocalLink) window.__readerLocalLink(e.data.hash);
             } else if (e.data.type === 'set-theme') {
@@ -1629,6 +1654,11 @@
 
     if (e.data.type === 'follow-link') {
       followLink(e.data.href);
+      return;
+    }
+
+    if (e.data.type === 'preview-link') {
+      previewLink(e.data.href);
       return;
     }
 
@@ -1782,6 +1812,23 @@
       pendingOffset = entry.scrollOffset;
       handleNavigateTo({ detail: { spineIndex: entry.spineIndex } });
     }
+  }
+
+  // Show a note's text in a popover; fall back to navigating if it has none.
+  async function previewLink(href) {
+    if (!$currentBookId || !href) return;
+    const fromSpine = $currentSpineIndex;
+    try {
+      const text = await getLinkPreview($currentBookId, fromSpine, href);
+      if (fromSpine !== $currentSpineIndex) return;
+      if (text) {
+        iframeEl?.contentWindow?.postMessage({ type: 'link-preview', href, text }, '*');
+        return;
+      }
+    } catch (err) {
+      console.error('Failed to preview link:', err);
+    }
+    followLink(href);
   }
 
   async function followLink(href) {
