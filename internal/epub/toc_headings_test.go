@@ -110,3 +110,28 @@ func TestAugmentTOCAddsEveryHeadingInAFile(t *testing.T) {
 		t.Errorf("served chapter must carry the generated id: %v %s", err, html)
 	}
 }
+
+func TestLinkPreview(t *testing.T) {
+	files := map[string]string{
+		"ch1.xhtml":   `<p>Text<a id="c1" href="notes.xhtml#n1">1</a></p>`,
+		"notes.xhtml": `<html><body><ol><li id="n1"><p>See <i>Koch</i>, Rediscovery, p. 28. <a href="ch1.xhtml#c1">↩</a></p></li></ol><p id="n2"><a>2.</a> Second note.</p><div id="n3"><a href="ch1.xhtml#c1">1</a> Third.</div></body></html>`,
+	}
+	r := readerWithFiles(t, files, []string{"ch1.xhtml", "notes.xhtml"}, nil)
+
+	cases := map[string]string{
+		"notes.xhtml#n1": "See Koch, Rediscovery, p. 28.",
+		"notes.xhtml#n2": "Second note.",
+		"notes.xhtml#n3": "Third.",
+	}
+	for href, want := range cases {
+		got, ok := r.LinkPreview(0, href)
+		if !ok || got != want {
+			t.Errorf("LinkPreview(%q) = %q, %v; want %q", href, got, ok, want)
+		}
+	}
+	for _, href := range []string{"notes.xhtml", "notes.xhtml#missing", "nope.xhtml#x"} {
+		if _, ok := r.LinkPreview(0, href); ok {
+			t.Errorf("LinkPreview(%q) should fail", href)
+		}
+	}
+}

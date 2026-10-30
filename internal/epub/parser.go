@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"golang.org/x/net/html"
+	nethtml "golang.org/x/net/html"
 )
 
 type Reader struct {
@@ -636,6 +637,109 @@ func (r *Reader) ResolveLink(from int, href string) (spineIndex int, fragment st
 		}
 	}
 	return 0, "", false
+}
+
+var noteBlockTags = map[string]bool{"li": true, "p": true, "div": true, "dd": true, "aside": true, "section": true, "blockquote": true, "td": true}
+var noteMarkerRegex = regexp.MustCompile(`^\s*[\[\(]?\d{1,4}[\]\)\.:]?\s*`)
+
+const maxPreviewRunes = 1200
+
+// LinkPreview returns the plain text of the block a link points at (e.g. an
+// endnote in another file), for showing in a popover without leaving the page.
+func (r *Reader) LinkPreview(from int, href string) (string, bool) {
+	idx, frag, ok := r.ResolveLink(from, href)
+	if !ok || frag == "" {
+		return "", false
+	}
+	data, err := r.readFile(r.resolvePath(r.spine[idx].Href))
+	if err != nil {
+		return "", false
+	}
+	doc, err := nethtml.Parse(strings.NewReader(string(data)))
+	if err != nil {
+		return "", false
+	}
+
+	attr := func(n *nethtml.Node, key string) string {
+		for _, a := range n.Attr {
+			if a.Key == key {
+				return a.Val
+			}
+		}
+		return ""
+	}
+	var target *nethtml.Node
+	var find func(*nethtml.Node)
+	find = func(n *nethtml.Node) {
+		if target != nil {
+			return
+		}
+		if n.Type == nethtml.ElementNode && (attr(n, "id") == frag || (n.Data == "a" && attr(n, "name") == frag)) {
+			target = n
+			return
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			find(c)
+		}
+	}
+	find(doc)
+	if target == nil {
+		return "", false
+	}
+
+	block := target
+	for block != nil && !(block.Type == nethtml.ElementNode && noteBlockTags[block.Data]) {
+		block = block.Parent
+	}
+	if block == nil {
+		block = target
+	}
+
+	var sb strings.Builder
+	var collect func(*nethtml.Node)
+	collect = func(n *nethtml.Node) {
+		switch {
+		case n.Type == nethtml.TextNode:
+			sb.WriteString(n.Data)
+		case n.Type == nethtml.ElementNode && (n.Data == "script" || n.Data == "style"):
+			return
+		case n.Type == nethtml.ElementNode && n.Data == "a":
+			// Skip backlinks such as "↩" or "^" that lead back to the reference
+			if t := strings.TrimSpace(nodeText(n)); len([]rune(t)) <= 3 && !noteMarkerRegex.MatchString(t) {
+				return
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			collect(c)
+		}
+		if n.Type == nethtml.ElementNode && (n.Data == "p" || n.Data == "br" || n.Data == "li") {
+			sb.WriteString("\n")
+		}
+	}
+	collect(block)
+
+	text := strings.Join(strings.Fields(strings.ReplaceAll(sb.String(), "\n", " \u00b6 ")), " ")
+	text = strings.TrimSpace(strings.Trim(strings.TrimSpace(noteMarkerRegex.ReplaceAllString(text, "")), "\u00b6 "))
+	text = strings.ReplaceAll(text, " \u00b6 ", "\n\n")
+	if runes := []rune(text); len(runes) > maxPreviewRunes {
+		text = string(runes[:maxPreviewRunes]) + "…"
+	}
+	return text, text != ""
+}
+
+func nodeText(n *nethtml.Node) string {
+	var sb strings.Builder
+	var walk func(*nethtml.Node)
+	walk = func(x *nethtml.Node) {
+		if x.Type == nethtml.TextNode {
+			sb.WriteString(x.Data)
+		}
+		for c := x.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(n)
+	return sb.String()
 }
 
 func (r *Reader) readFile(name string) ([]byte, error) {

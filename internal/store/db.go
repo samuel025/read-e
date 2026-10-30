@@ -252,7 +252,7 @@ func (s *Store) UpsertBook(b library.BookMeta) error {
 			title = excluded.title,
 			author = excluded.author,
 			file_path = excluded.file_path,
-			cover_base64 = excluded.cover_base64,
+			cover_base64 = CASE WHEN excluded.cover_base64 != '' THEN excluded.cover_base64 ELSE books.cover_base64 END,
 			format = excluded.format,
 			total_count = CASE WHEN excluded.total_count > 0 THEN excluded.total_count ELSE books.total_count END
 	`, b.ID, b.Title, b.Author, b.FilePath, cover.Thumbnail(b.CoverBase64), format, b.TotalCount, b.AddedAt)
@@ -275,7 +275,8 @@ func (s *Store) GetBooks() ([]library.BookMeta, error) {
 		       COALESCE(b.total_count, 0), b.added_at,
 		       COALESCE(p.spine_index, 0) as spine_index,
 		       COALESCE(p.finished, 0) as finished,
-		       CASE WHEN p.book_id IS NOT NULL THEN 1 ELSE 0 END as has_progress
+		       CASE WHEN p.book_id IS NOT NULL THEN 1 ELSE 0 END as has_progress,
+		       COALESCE(CAST(strftime('%s', p.updated_at) AS INTEGER), 0) as last_read
 		FROM books b
 		LEFT JOIN progress p ON b.id = p.book_id
 		ORDER BY b.added_at DESC
@@ -291,13 +292,15 @@ func (s *Store) GetBooks() ([]library.BookMeta, error) {
 	for rows.Next() {
 		var b library.BookMeta
 		var hasProgress, finished, spineIndex, totalCount, coverLen int
-		if err := rows.Scan(&b.ID, &b.Title, &b.Author, &b.FilePath, &coverLen, &b.Format, &totalCount, &b.AddedAt, &spineIndex, &finished, &hasProgress); err != nil {
+		var lastRead int64
+		if err := rows.Scan(&b.ID, &b.Title, &b.Author, &b.FilePath, &coverLen, &b.Format, &totalCount, &b.AddedAt, &spineIndex, &finished, &hasProgress, &lastRead); err != nil {
 			return nil, err
 		}
 		// Covers are served over HTTP (/cover/{id}) instead of travelling as base64 through the bridge.
 		if coverLen > 0 {
 			b.CoverURL = fmt.Sprintf("/cover/%s?v=%d", url.PathEscape(b.ID), coverLen)
 		}
+		b.LastReadAt = lastRead
 		b.TotalCount = totalCount
 		b.HasProgress = hasProgress == 1
 		b.Finished = finished == 1

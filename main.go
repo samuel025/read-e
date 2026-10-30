@@ -44,6 +44,16 @@ func main() {
 			Assets:  assets,
 			Handler: app,
 		},
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId:               "io.github.samuel025.read-e",
+			OnSecondInstanceLaunch: app.onSecondInstance,
+		},
+		// Dropped files arrive as paths via the runtime; the webview must not
+		// navigate to them.
+		DragAndDrop: &options.DragAndDrop{
+			EnableFileDrop:     true,
+			DisableWebViewDrop: true,
+		},
 		OnStartup:  app.startup,
 		OnShutdown: app.shutdown,
 		Linux: &linux.Options{

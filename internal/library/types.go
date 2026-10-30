@@ -10,6 +10,7 @@ type BookMeta struct {
 	CoverBase64 string    `json:"coverBase64,omitempty"`
 	CoverURL    string    `json:"coverUrl,omitempty"`
 	AddedAt     time.Time `json:"addedAt"`
+	LastReadAt  int64     `json:"lastReadAt"` // unix seconds of the last progress save; 0 = never opened
 	HasProgress bool      `json:"hasProgress"`
 	Format      string    `json:"format"`
 	SpineIndex  int       `json:"spineIndex"`

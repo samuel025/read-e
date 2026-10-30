@@ -21,6 +21,7 @@ import (
 	"epub-reader/internal/library"
 	"epub-reader/internal/store"
 
+	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -31,6 +32,10 @@ type App struct {
 	mu        sync.Mutex
 	openBooks map[string]*epub.Reader
 	bookPaths map[string]string
+
+	// pendingOpen is a book the app was launched with (file manager / command
+	// line); the frontend collects it once it is ready.
+	pendingOpen string
 }
 
 func NewApp() *App {
@@ -60,6 +65,106 @@ func (a *App) startup(ctx context.Context) {
 	for _, b := range books {
 		a.bookPaths[b.ID] = b.FilePath
 	}
+
+	if id := a.openFromArgs(os.Args[1:]); id != "" {
+		a.mu.Lock()
+		a.pendingOpen = id
+		a.mu.Unlock()
+	}
+}
+
+// pathFromArg turns a launch argument (plain path or file:// URI, as passed by
+// desktop entries using %U) into a supported book path, or "" if it is not one.
+func pathFromArg(arg string) string {
+	if strings.HasPrefix(arg, "file://") {
+		u, err := url.Parse(arg)
+		if err != nil {
+			return ""
+		}
+		arg = u.Path
+	}
+	switch strings.ToLower(filepath.Ext(arg)) {
+	case ".epub", ".pdf":
+		if st, err := os.Stat(arg); err == nil && !st.IsDir() {
+			return arg
+		}
+	}
+	return ""
+}
+
+// addPath registers a book file in the library (if new) and returns its id.
+func (a *App) addPath(path string) (string, error) {
+	meta, err := library.ScanFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse %s: %w", path, err)
+	}
+	// Re-adding a known book must not reset it (its cover may have been generated later)
+	if _, err := a.store.GetBook(meta.ID); err != nil {
+		if err := a.store.UpsertBook(meta); err != nil {
+			return "", err
+		}
+	}
+	a.mu.Lock()
+	a.bookPaths[meta.ID] = meta.FilePath
+	a.mu.Unlock()
+	return meta.ID, nil
+}
+
+// openFromArgs adds the first supported book among args and returns its id.
+func (a *App) openFromArgs(args []string) string {
+	for _, arg := range args {
+		if p := pathFromArg(arg); p != "" {
+			id, err := a.addPath(p)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "open %s: %v\n", p, err)
+				continue
+			}
+			return id
+		}
+	}
+	return ""
+}
+
+// onSecondInstance runs when the app is launched again (e.g. double-clicking
+// another book); it opens the book in the existing window.
+func (a *App) onSecondInstance(data options.SecondInstanceData) {
+	runtime.WindowUnminimise(a.ctx)
+	runtime.WindowShow(a.ctx)
+	if id := a.openFromArgs(data.Args); id != "" {
+		runtime.EventsEmit(a.ctx, "open-book", id)
+	}
+}
+
+// GetPendingOpen returns (once) the book id the app was launched with.
+func (a *App) GetPendingOpen() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	id := a.pendingOpen
+	a.pendingOpen = ""
+	return id
+}
+
+// AddBooks adds several files (e.g. dropped onto the window) and returns the library.
+func (a *App) AddBooks(paths []string) ([]library.BookMeta, error) {
+	added := 0
+	var firstErr error
+	for _, p := range paths {
+		path := pathFromArg(p)
+		if path == "" {
+			continue
+		}
+		if _, err := a.addPath(path); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		added++
+	}
+	if added == 0 && firstErr != nil {
+		return nil, firstErr
+	}
+	return a.store.GetBooks()
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -248,6 +353,17 @@ func (a *App) ResolveLink(bookID string, spineIndex int, href string) (LinkTarge
 	}
 	idx, hash, ok := reader.ResolveLink(spineIndex, href)
 	return LinkTarget{Found: ok, SpineIndex: idx, Hash: hash}, nil
+}
+
+// GetLinkPreview returns the text a link in chapter spineIndex points at, so
+// notes in another file can be previewed in place.
+func (a *App) GetLinkPreview(bookID string, spineIndex int, href string) (string, error) {
+	reader, err := a.getReader(bookID)
+	if err != nil {
+		return "", err
+	}
+	text, _ := reader.LinkPreview(spineIndex, href)
+	return text, nil
 }
 
 func (a *App) SaveProgress(bookID string, spineIndex int, scrollOffset float64) error {

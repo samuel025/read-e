@@ -79,4 +79,6 @@ type AppSettings struct {
 	MaxWidth   int     `json:"maxWidth"`   // e.g. 780px
 	LineHeight float64 `json:"lineHeight"` // e.g. 1.7
 	TextAlign  string  `json:"textAlign"`  // "left" | "justify"
+	// DailyGoalMinutes is the reading goal shown in Insights; 0 means none.
+	DailyGoalMinutes int `json:"dailyGoalMinutes"`
 }
