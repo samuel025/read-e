@@ -1,4 +1,5 @@
 <script>
+  import ExportModal from './ExportModal.svelte';
   import {
     bookmarks, currentBook, currentBookId, currentSpineIndex,
     currentChapter, toc
@@ -70,6 +71,31 @@
     }
   }
 
+  let showExportModal = false;
+
+  function generateMarkdown() {
+    const isPDF = $currentBook?.format === 'pdf';
+    const bookTitle = $currentBook?.title || 'Book';
+    const author = $currentBook?.author || '';
+
+    let md = `# Bookmarks in ${bookTitle}\n`;
+    if (author) md += `*by ${author}*\n`;
+    md += `\nExported on ${new Date().toLocaleDateString()}\n\n---\n\n`;
+
+    const sorted = [...$bookmarks].sort(
+      (a, b) => a.spineIndex - b.spineIndex || (a.scrollOffset || 0) - (b.scrollOffset || 0)
+    );
+    for (const bm of sorted) {
+      const where = isPDF ? `page ${bm.spineIndex + 1}` : null;
+      const name = getChapterTitle(bm.spineIndex);
+      md += `- **${name}**${where ? ` (${where})` : ''}`;
+      const saved = formatDate(bm.createdAt);
+      if (saved) md += ` — saved ${saved}`;
+      md += '\n';
+    }
+    return md;
+  }
+
   async function handleDelete(e, id) {
     e.stopPropagation();
     await deleteBookmark(id);
@@ -78,6 +104,19 @@
 </script>
 
 <div class="bookmarks-panel">
+  {#if $bookmarks.length > 0}
+    <div class="bookmarks-toolbar">
+      <span class="bookmarks-count">{$bookmarks.length} bookmark{$bookmarks.length === 1 ? '' : 's'}</span>
+      <button class="export-btn" on:click={() => showExportModal = true} title="Export bookmarks to Markdown">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        <span>Export</span>
+      </button>
+    </div>
+  {/if}
   <div class="bookmarks-list">
     {#if $bookmarks.length === 0}
       <div class="empty-state">
@@ -132,7 +171,50 @@
   </div>
 </div>
 
+{#if showExportModal}
+  <ExportModal
+    title="Export Bookmarks"
+    subtitle="A Markdown list of your saved places"
+    markdown={generateMarkdown()}
+    filename={`${($currentBook?.title || 'bookmarks').replace(/[^a-z0-9]/gi, '_').toLowerCase()}_bookmarks.md`}
+    on:close={() => showExportModal = false}
+  />
+{/if}
+
 <style>
+  .bookmarks-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-sm) var(--space-md) 0;
+  }
+
+  .bookmarks-count {
+    font-size: 0.75rem;
+    color: var(--fg-tertiary);
+  }
+
+  .export-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-subtle);
+    border: 1px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    transition-property: background-color, color, border-color, opacity, transform;
+    transition-duration: var(--duration-fast);
+    transition-timing-function: var(--ease-out);
+  }
+
+  .export-btn:hover {
+    filter: brightness(1.1);
+  }
+
   .bookmarks-panel {
     display: flex;
     flex-direction: column;
