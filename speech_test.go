@@ -10,8 +10,8 @@ func TestSpeechCommand(t *testing.T) {
 		engine string
 		want   []string
 	}{
-		{"spd-say", []string{"spd-say", "-w", "--", "-dash start"}},
-		{"espeak-ng", []string{"espeak-ng", "-s", "165", "--", "-dash start"}},
+		{"spd-say", []string{"spd-say", "-w", "-i", "100", "--", "-dash start"}},
+		{"espeak-ng", []string{"espeak-ng", "-s", "165", "-a", "200", "--", "-dash start"}},
 	}
 	for _, c := range cases {
 		if got := speechCommand(c.engine, "-dash start"); !reflect.DeepEqual(got, c.want) {

@@ -32,6 +32,11 @@ func init() {
 }
 
 func main() {
+	// `read-e --install-voice` sets up the natural reading voice and exits
+	if len(os.Args) > 1 && os.Args[1] == "--install-voice" {
+		os.Exit(installVoice())
+	}
+
 	app := NewApp()
 
 	err := wails.Run(&options.App{

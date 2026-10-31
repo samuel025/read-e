@@ -9,7 +9,7 @@
     getChapter, saveProgress, getProgress,
     addHighlight, deleteHighlight, updateHighlightNote,
     saveBookmark, deleteBookmark, markBookFinished, resolveLink, getLinkPreview,
-    speechEngine, speak, stopSpeaking
+    speechEngine, speak, stopSpeaking, prefetchSpeech
   } from './api.js';
   import DictionaryPopover from './DictionaryPopover.svelte';
 
@@ -1818,6 +1818,7 @@
   // ---- Read aloud (system speech program driven by the backend; see speech.go) ----
   let ttsState = 'idle'; // 'idle' | 'playing' | 'paused'
   let ttsMessage = '';
+  let basicVoiceHintShown = false;
   let ttsQueue = [];
   let ttsIndex = 0;
   let ttsToken = 0;
@@ -1897,6 +1898,9 @@
     while (token === ttsToken && ttsIndex < ttsQueue.length) {
       const item = ttsQueue[ttsIndex];
       highlightTtsBlock(item.el);
+      // Have the next chunk ready so there is no pause between them
+      const upcoming = ttsQueue[ttsIndex + 1];
+      if (upcoming) prefetchSpeech(upcoming.text).catch(() => {});
       try {
         await speak(item.text);
       } catch (err) {
@@ -1950,6 +1954,10 @@
     if (ttsQueue.length === 0) {
       showTtsMessage('Nothing to read here.');
       return;
+    }
+    if (engine !== 'piper' && !basicVoiceHintShown) {
+      basicVoiceHintShown = true;
+      showTtsMessage('Using a basic voice. For a natural one, run this in a terminal: read-e --install-voice');
     }
     startTtsFrom(0);
   }

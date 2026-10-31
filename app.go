@@ -39,11 +39,10 @@ type App struct {
 	pendingOpen string
 
 	// Read aloud (see speech.go)
-	speechOnce   sync.Once
-	speechEngine string
-	speechMu     sync.Mutex
-	speechCmd    *exec.Cmd
-	speechGen    int
+	speechMu   sync.Mutex
+	speechCmds []*exec.Cmd
+	speechGen  int
+	speechNext *prefetched
 }
 
 func NewApp() *App {

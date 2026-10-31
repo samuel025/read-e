@@ -59,6 +59,8 @@ sudo dpkg -i read-e_2.0.0_amd64.deb
 - Bookmark Management: Quick-toggle bookmark button and shortcut (`Ctrl+D` / `Cmd+D`) with exact scroll-offset restoration and a dedicated Bookmarks drawer.
 - Reading Statistics and Pacing: Real-time chapter and document word-count calculation displaying estimated reading time remaining based on a standard 220 WPM pacing model.
 - Table of Contents: Complete hierarchy navigation supporting nested sections, chapters, and PDF bookmarks.
+- Read Aloud: The speaker button reads an EPUB chapter aloud from the first paragraph on screen. It uses a system speech engine (`spd-say`, `espeak-ng` or `espeak`), which sounds robotic. For a natural offline voice run `read-e --install-voice`: it downloads the [Piper](https://github.com/rhasspy/piper) engine (~25 MB) and an English voice (~65 MB) into `~/.local/share/read-e` after verifying their SHA-256 checksums. Piper only runs while reading aloud. Playback needs `pw-cat`, `paplay`, `aplay` or `ffplay`.
+- Open and Add Books Easily: Pass a book on the command line or double-click it in the file manager (a running window is reused), and drop EPUB/PDF files onto the library to add them.
 
 ### Reading Insights Dashboard
 - Reading Streaks: Automatic tracking of current day streak and all-time longest streak.

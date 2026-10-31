@@ -316,6 +316,13 @@ export async function speak(text) {
   return go.Speak(text);
 }
 
+// Lets the backend prepare the next chunk while the current one is playing
+export async function prefetchSpeech(text) {
+  const go = getGoBinding();
+  if (!go || !go.PrefetchSpeech) return;
+  return go.PrefetchSpeech(text);
+}
+
 export async function stopSpeaking() {
   const go = getGoBinding();
   if (!go || !go.StopSpeaking) return;
