@@ -301,3 +301,23 @@ export async function getLinkPreview(bookID, spineIndex, href) {
   if (!go || !go.GetLinkPreview) return '';
   return go.GetLinkPreview(bookID, spineIndex, href);
 }
+
+// Read aloud runs in the backend through a system speech program
+export async function speechEngine() {
+  const go = getGoBinding();
+  if (!go || !go.SpeechEngine) return '';
+  return go.SpeechEngine();
+}
+
+// Resolves when the text has been spoken (or speech was stopped)
+export async function speak(text) {
+  const go = getGoBinding();
+  if (!go || !go.Speak) throw new Error('speech is unavailable');
+  return go.Speak(text);
+}
+
+export async function stopSpeaking() {
+  const go = getGoBinding();
+  if (!go || !go.StopSpeaking) return;
+  return go.StopSpeaking();
+}

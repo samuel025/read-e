@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy, tick, createEventDispatcher } from 'svelte';
-  import { lookupWord } from './api.js';
+  import { lookupWord, speak, stopSpeaking } from './api.js';
 
   export let word = '';
   export let x = 0;
@@ -63,6 +63,7 @@
   }
 
   let currentAudio = null;
+  let backendSpeaking = false; // only stop the backend if this popover started it
 
   function stopSpeech() {
     if (currentAudio) {
@@ -73,6 +74,8 @@
       currentAudio = null;
     }
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    // Not unconditional: closing a lookup must not cut off a chapter being read aloud
+    if (backendSpeaking) stopSpeaking();
   }
 
   onDestroy(stopSpeech);
@@ -106,14 +109,22 @@
   }
 
   function speakFallback() {
-    if ('speechSynthesis' in window && entry?.word) {
+    if (!entry?.word) return;
+    if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
+      // The web view has no speech API: use the system speech program instead
       isPlayingAudio = true;
-      const utterance = new SpeechSynthesisUtterance(entry.word);
-      utterance.rate = 0.9;
-      utterance.onend = () => { isPlayingAudio = false; };
-      utterance.onerror = () => { isPlayingAudio = false; };
-      window.speechSynthesis.speak(utterance);
+      backendSpeaking = true;
+      speak(entry.word)
+        .catch(() => {})
+        .finally(() => { isPlayingAudio = false; backendSpeaking = false; });
+      return;
     }
+    isPlayingAudio = true;
+    const utterance = new SpeechSynthesisUtterance(entry.word);
+    utterance.rate = 0.9;
+    utterance.onend = () => { isPlayingAudio = false; };
+    utterance.onerror = () => { isPlayingAudio = false; };
+    window.speechSynthesis.speak(utterance);
   }
 
   function copyDefinition() {

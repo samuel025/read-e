@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
@@ -36,6 +37,13 @@ type App struct {
 	// pendingOpen is a book the app was launched with (file manager / command
 	// line); the frontend collects it once it is ready.
 	pendingOpen string
+
+	// Read aloud (see speech.go)
+	speechOnce   sync.Once
+	speechEngine string
+	speechMu     sync.Mutex
+	speechCmd    *exec.Cmd
+	speechGen    int
 }
 
 func NewApp() *App {
@@ -168,6 +176,7 @@ func (a *App) AddBooks(paths []string) ([]library.BookMeta, error) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	a.StopSpeaking()
 	a.mu.Lock()
 	for _, r := range a.openBooks {
 		r.Close()

@@ -8,7 +8,8 @@
   import {
     getChapter, saveProgress, getProgress,
     addHighlight, deleteHighlight, updateHighlightNote,
-    saveBookmark, deleteBookmark, markBookFinished, resolveLink, getLinkPreview
+    saveBookmark, deleteBookmark, markBookFinished, resolveLink, getLinkPreview,
+    speechEngine, speak, stopSpeaking
   } from './api.js';
   import DictionaryPopover from './DictionaryPopover.svelte';
 
@@ -1814,7 +1815,7 @@
     }
   }
 
-  // ---- Read aloud (browser speech synthesis; no extra dependencies) ----
+  // ---- Read aloud (system speech program driven by the backend; see speech.go) ----
   let ttsState = 'idle'; // 'idle' | 'playing' | 'paused'
   let ttsMessage = '';
   let ttsQueue = [];
@@ -1822,7 +1823,6 @@
   let ttsToken = 0;
   let ttsCurrentEl = null;
   let ttsMessageTimer = null;
-  let ttsStartTimer = null;
 
   function showTtsMessage(text) {
     ttsMessage = text;
@@ -1840,8 +1840,8 @@
     }
   }
 
-  // Break text into sentence-sized chunks: long utterances are cut off by some engines
-  function chunkText(text, max = 220) {
+  // Break text into sentence-sized chunks so playback can start quickly and pause/resume mid-paragraph
+  function chunkText(text, max = 400) {
     const parts = text.match(/[^.!?…]+[.!?…]+["”’)\]]*\s*|[^.!?…]+$/g) || [text];
     const chunks = [];
     let cur = '';
@@ -1879,89 +1879,79 @@
     return queue;
   }
 
-  function speakNext(token) {
-    if (token !== ttsToken) return;
-    if (ttsIndex >= ttsQueue.length) {
-      stopTts();
-      return;
-    }
-    const item = ttsQueue[ttsIndex];
-    const utterance = new SpeechSynthesisUtterance(item.text);
-    utterance.onstart = () => {
-      if (token !== ttsToken) return;
-      clearTimeout(ttsStartTimer);
-      if (item.el !== ttsCurrentEl) {
-        clearTtsHighlight();
-        ttsCurrentEl = item.el;
-        try {
-          item.el.style.backgroundColor = 'rgba(129, 140, 248, 0.22)';
-          item.el.style.borderRadius = '4px';
-          const r = item.el.getBoundingClientRect();
-          const h = iframeEl?.clientHeight || 600;
-          if (r.top < 0 || r.bottom > h) item.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        } catch (_) {}
+  function highlightTtsBlock(el) {
+    if (el === ttsCurrentEl) return;
+    clearTtsHighlight();
+    ttsCurrentEl = el;
+    try {
+      el.style.backgroundColor = 'rgba(129, 140, 248, 0.22)';
+      el.style.borderRadius = '4px';
+      const r = el.getBoundingClientRect();
+      const h = iframeEl?.clientHeight || 600;
+      if (r.top < 0 || r.bottom > h) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } catch (_) {}
+  }
+
+  // Speak the queue one chunk at a time; each call returns when its chunk is done
+  async function speakFrom(token) {
+    while (token === ttsToken && ttsIndex < ttsQueue.length) {
+      const item = ttsQueue[ttsIndex];
+      highlightTtsBlock(item.el);
+      try {
+        await speak(item.text);
+      } catch (err) {
+        if (token === ttsToken) {
+          stopTts();
+          showTtsMessage('Read aloud failed: the speech engine reported an error.');
+        }
+        return;
       }
-    };
-    utterance.onend = () => {
-      if (token !== ttsToken) return;
+      if (token !== ttsToken) return; // paused or stopped meanwhile
       ttsIndex++;
-      speakNext(token);
-    };
-    utterance.onerror = (e) => {
-      if (token !== ttsToken) return;
-      if (e.error === 'canceled' || e.error === 'interrupted') return;
-      stopTts();
-      showTtsMessage('Read aloud failed: the speech engine reported an error.');
-    };
-    window.speechSynthesis.speak(utterance);
+    }
+    if (token === ttsToken) stopTts(); // reached the end of the chapter
   }
 
   function startTtsFrom(index) {
     const token = ++ttsToken;
     ttsIndex = index;
     ttsState = 'playing';
-    window.speechSynthesis.cancel();
-    // If nothing starts speaking, no voice is installed
-    clearTimeout(ttsStartTimer);
-    ttsStartTimer = setTimeout(() => {
-      if (token === ttsToken && ttsState === 'playing' && !ttsCurrentEl) {
-        stopTts();
-        showTtsMessage('No speech voice found. Install one (e.g. sudo apt install speech-dispatcher espeak-ng) and restart.');
-      }
-    }, 3000);
-    speakNext(token);
+    speakFrom(token);
   }
 
   function stopTts() {
     ttsToken++;
-    clearTimeout(ttsStartTimer);
-    try { window.speechSynthesis?.cancel(); } catch (_) {}
+    stopSpeaking();
     clearTtsHighlight();
     ttsQueue = [];
     ttsIndex = 0;
     ttsState = 'idle';
   }
 
-  function toggleTts() {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
-      showTtsMessage('Read aloud is not available on this system.');
+  async function toggleTts() {
+    if (ttsState === 'playing') {
+      // Pause = stop speaking but remember the place
+      ttsToken++;
+      stopSpeaking();
+      ttsState = 'paused';
       return;
     }
-    if (ttsState === 'playing') {
-      // Pause = stop speaking but remember the place (engine-level pause is unreliable)
-      ttsToken++;
-      window.speechSynthesis.cancel();
-      ttsState = 'paused';
-    } else if (ttsState === 'paused') {
+    if (ttsState === 'paused') {
       startTtsFrom(ttsIndex);
-    } else {
-      ttsQueue = buildTtsQueue();
-      if (ttsQueue.length === 0) {
-        showTtsMessage('Nothing to read here.');
-        return;
-      }
-      startTtsFrom(0);
+      return;
     }
+
+    const engine = await speechEngine();
+    if (!engine) {
+      showTtsMessage('No speech engine found. Install one with: sudo apt install speech-dispatcher espeak-ng');
+      return;
+    }
+    ttsQueue = buildTtsQueue();
+    if (ttsQueue.length === 0) {
+      showTtsMessage('Nothing to read here.');
+      return;
+    }
+    startTtsFrom(0);
   }
 
   // A different chapter was loaded: its text is no longer what was being read
