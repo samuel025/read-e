@@ -3,6 +3,7 @@
   import { getReadingInsights, saveSettings } from './api.js';
   import { settings } from '../stores/app.js';
   import { localDateKey } from './dates.js';
+  import Dropdown from './Dropdown.svelte';
 
   const dispatch = createEventDispatcher();
   let loading = true;
@@ -24,6 +25,7 @@
   }
 
   function handleKeydown(e) {
+    if (e.defaultPrevented) return; // e.g. Escape that just closed a dropdown
     if (e.key === 'Escape') {
       close();
     }
@@ -168,16 +170,13 @@
               <span class="goal-sub">Pick a daily reading target to track it here</span>
             {/if}
           </div>
-          <select
-            class="goal-select"
-            aria-label="Daily reading goal"
+          <Dropdown
+            options={GOAL_OPTIONS.map((m) => ({ value: m, label: m === 0 ? 'Off' : `${m} min` }))}
             value={goalMinutes}
-            on:change={(e) => setGoal(e.target.value)}
-          >
-            {#each GOAL_OPTIONS as m}
-              <option value={m}>{m === 0 ? 'Off' : `${m} min`}</option>
-            {/each}
-          </select>
+            ariaLabel="Daily reading goal"
+            align="right"
+            on:change={(e) => setGoal(e.detail)}
+          />
         </div>
 
         <!-- 4 Minimalist Stat Cards Grid -->
@@ -368,17 +367,6 @@
   .goal-sub {
     font-size: 0.75rem;
     color: var(--fg-tertiary);
-  }
-
-  .goal-select {
-    background: var(--bg-hover);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    padding: 6px 8px;
-    font-size: 0.8125rem;
-    font-family: var(--font-sans);
-    color: var(--fg-primary);
-    cursor: pointer;
   }
 
   .modal-backdrop {

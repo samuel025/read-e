@@ -7,6 +7,7 @@
     getShelves, deleteShelf, getShelfBookIDs, removeBookFromShelf, addBooks
   } from './api.js';
   import { openBookById } from './openBook.js';
+  import Dropdown from './Dropdown.svelte';
   import BookCard from './BookCard.svelte';
   import InsightsModal from './InsightsModal.svelte';
   import ShelfModal from './ShelfModal.svelte';
@@ -612,17 +613,13 @@
           </button>
         {/if}
 
-        <select
-          class="sort-select"
-          aria-label="Sort books"
-          title="Sort books"
+        <Dropdown
+          options={SORT_OPTIONS.map((o) => ({ value: o.id, label: o.label }))}
           value={sortBy}
-          on:change={(e) => setSort(e.target.value)}
-        >
-          {#each SORT_OPTIONS as o}
-            <option value={o.id}>{o.label}</option>
-          {/each}
-        </select>
+          ariaLabel="Sort books"
+          align="right"
+          on:change={(e) => setSort(e.detail)}
+        />
 
         <div class="search-wrapper">
           <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1299,22 +1296,6 @@
     flex: 1;
     overflow-y: auto;
     padding: var(--space-xl);
-  }
-
-  .sort-select {
-    background: var(--bg-hover);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    padding: 6px 8px;
-    font-size: 0.8125rem;
-    font-family: var(--font-sans);
-    color: var(--fg-primary);
-    cursor: pointer;
-  }
-
-  .sort-select:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
   }
 
   .continue-strip {
