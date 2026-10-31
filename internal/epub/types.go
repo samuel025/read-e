@@ -81,4 +81,7 @@ type AppSettings struct {
 	TextAlign  string  `json:"textAlign"`  // "left" | "justify"
 	// DailyGoalMinutes is the reading goal shown in Insights; 0 means none.
 	DailyGoalMinutes int `json:"dailyGoalMinutes"`
+	// Read aloud: SpeechSpeed is a multiplier and SpeechVolume a percentage; 0 = normal.
+	SpeechSpeed  float64 `json:"speechSpeed"`
+	SpeechVolume int     `json:"speechVolume"`
 }

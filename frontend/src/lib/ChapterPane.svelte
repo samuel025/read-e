@@ -9,7 +9,7 @@
     getChapter, saveProgress, getProgress,
     addHighlight, deleteHighlight, updateHighlightNote,
     saveBookmark, deleteBookmark, markBookFinished, resolveLink, getLinkPreview,
-    speechEngine, speak, stopSpeaking, prefetchSpeech
+    speechEngine, speak, stopSpeaking, prefetchSpeech, saveSettings
   } from './api.js';
   import DictionaryPopover from './DictionaryPopover.svelte';
 
@@ -1630,6 +1630,10 @@
   }
 
   function handleKeydown(e) {
+    if (e.key === 'Escape' && ttsPanelOpen) {
+      ttsPanelOpen = false;
+      return;
+    }
     if (e.altKey && e.key === 'ArrowLeft') {
       e.preventDefault();
       goBack();
@@ -1819,6 +1823,54 @@
   let ttsState = 'idle'; // 'idle' | 'playing' | 'paused'
   let ttsMessage = '';
   let basicVoiceHintShown = false;
+  let ttsPanelOpen = false;
+  let ttsPreviewing = false;
+
+  const TTS_SPEED_MIN = 0.6, TTS_SPEED_MAX = 2.0;
+  const TTS_VOLUME_MIN = 10, TTS_VOLUME_MAX = 150;
+  $: ttsSpeed = $settings.speechSpeed || 1;
+  $: ttsVolume = $settings.speechVolume || 100;
+
+  // Slider moves update the label live; releasing saves and applies it right away
+  function previewTtsSetting(key, value) {
+    settings.update((s) => ({ ...s, [key]: value }));
+  }
+
+  function commitTtsSettings() {
+    saveSettings($settings);
+    if (ttsState === 'playing') {
+      // Re-read the current chunk with the new voice settings
+      ttsToken++;
+      stopSpeaking();
+      startTtsFrom(ttsIndex);
+    }
+  }
+
+  function resetTtsSettings() {
+    settings.update((s) => ({ ...s, speechSpeed: 1, speechVolume: 100 }));
+    commitTtsSettings();
+  }
+
+  async function previewVoice() {
+    if (ttsPreviewing || ttsState === 'playing') return;
+    ttsPreviewing = true;
+    try {
+      const engine = await speechEngine();
+      if (!engine) {
+        showTtsMessage('No speech engine found. Install one with: sudo apt install speech-dispatcher espeak-ng');
+        return;
+      }
+      await speak('This is how reading aloud will sound.', ttsSpeed, ttsVolume);
+    } catch (_) {
+      showTtsMessage('Read aloud failed: the speech engine reported an error.');
+    } finally {
+      ttsPreviewing = false;
+    }
+  }
+
+  function onWindowPointerDown(e) {
+    if (ttsPanelOpen && !e.target.closest?.('.tts-panel, #tts-settings-btn')) ttsPanelOpen = false;
+  }
   let ttsQueue = [];
   let ttsIndex = 0;
   let ttsToken = 0;
@@ -1900,9 +1952,9 @@
       highlightTtsBlock(item.el);
       // Have the next chunk ready so there is no pause between them
       const upcoming = ttsQueue[ttsIndex + 1];
-      if (upcoming) prefetchSpeech(upcoming.text).catch(() => {});
+      if (upcoming) prefetchSpeech(upcoming.text, ttsSpeed).catch(() => {});
       try {
-        await speak(item.text);
+        await speak(item.text, ttsSpeed, ttsVolume);
       } catch (err) {
         if (token === ttsToken) {
           stopTts();
@@ -2230,6 +2282,8 @@
         }, 500);
       }, { passive: true });
 
+      iframeEl.contentWindow.addEventListener('pointerdown', () => { ttsPanelOpen = false; }, { passive: true });
+
       iframeEl.contentWindow.addEventListener('resize', () => {
         queuePageCalculation();
       }, { passive: true });
@@ -2283,6 +2337,8 @@
   });
 </script>
 
+<svelte:window on:pointerdown={onWindowPointerDown} />
+
 <div class="chapter-pane">
   {#if loading}
     <div class="chapter-loading">
@@ -2312,6 +2368,39 @@
     <div class="tts-message" role="status">{ttsMessage}</div>
   {/if}
 
+  {#if ttsPanelOpen}
+    <div class="tts-panel" role="dialog" aria-label="Read aloud settings">
+      <div class="tts-row">
+        <label for="tts-speed">Speed</label>
+        <span class="tts-value">{ttsSpeed.toFixed(1)}×</span>
+      </div>
+      <input
+        id="tts-speed" type="range" class="tts-slider"
+        min={TTS_SPEED_MIN} max={TTS_SPEED_MAX} step="0.1"
+        value={ttsSpeed}
+        on:input={(e) => previewTtsSetting('speechSpeed', parseFloat(e.target.value))}
+        on:change={commitTtsSettings}
+      />
+      <div class="tts-row">
+        <label for="tts-volume">Volume</label>
+        <span class="tts-value">{ttsVolume}%</span>
+      </div>
+      <input
+        id="tts-volume" type="range" class="tts-slider"
+        min={TTS_VOLUME_MIN} max={TTS_VOLUME_MAX} step="5"
+        value={ttsVolume}
+        on:input={(e) => previewTtsSetting('speechVolume', parseInt(e.target.value, 10))}
+        on:change={commitTtsSettings}
+      />
+      <div class="tts-actions">
+        <button class="tts-link" on:click={resetTtsSettings}>Reset</button>
+        <button class="tts-preview" on:click={previewVoice} disabled={ttsPreviewing || ttsState === 'playing'}>
+          {ttsPreviewing ? 'Playing…' : 'Preview'}
+        </button>
+      </div>
+    </div>
+  {/if}
+
   <!-- Chapter nav buttons -->
   <div class="chapter-nav">
     {#if ttsState !== 'idle'}
@@ -2319,6 +2408,19 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>
       </button>
     {/if}
+    <button
+      class="nav-btn"
+      class:tts-active={ttsPanelOpen}
+      on:click={() => (ttsPanelOpen = !ttsPanelOpen)}
+      title="Read aloud speed and volume"
+      aria-expanded={ttsPanelOpen}
+      id="tts-settings-btn"
+    >
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="17" x2="20" y2="17"/>
+        <circle cx="9" cy="7" r="2.2" fill="var(--bg-primary)"/><circle cx="15" cy="17" r="2.2" fill="var(--bg-primary)"/>
+      </svg>
+    </button>
     <button
       class="nav-btn"
       class:tts-active={ttsState !== 'idle'}
@@ -2473,6 +2575,85 @@
   .nav-btn.tts-active {
     color: var(--accent);
     border-color: var(--accent);
+  }
+
+  .tts-panel {
+    position: absolute;
+    right: 24px;
+    bottom: 76px;
+    width: 250px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-medium);
+    background: var(--bg-elevated, var(--bg-primary));
+    box-shadow: var(--shadow-lg);
+    z-index: 7;
+  }
+
+  .tts-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-top: 4px;
+  }
+
+  .tts-row label {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--fg-secondary);
+  }
+
+  .tts-value {
+    font-size: 0.8125rem;
+    color: var(--fg-tertiary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tts-slider {
+    width: 100%;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
+  .tts-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8px;
+  }
+
+  .tts-link {
+    background: none;
+    border: none;
+    padding: 4px 2px;
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    color: var(--fg-tertiary);
+    cursor: pointer;
+  }
+
+  .tts-link:hover {
+    color: var(--fg-primary);
+  }
+
+  .tts-preview {
+    padding: 6px 14px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--accent);
+    background: var(--accent-subtle);
+    color: var(--accent);
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .tts-preview:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
 
   .tts-message {

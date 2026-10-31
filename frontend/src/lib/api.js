@@ -310,17 +310,17 @@ export async function speechEngine() {
 }
 
 // Resolves when the text has been spoken (or speech was stopped)
-export async function speak(text) {
+export async function speak(text, speed = 1, volume = 100) {
   const go = getGoBinding();
   if (!go || !go.Speak) throw new Error('speech is unavailable');
-  return go.Speak(text);
+  return go.Speak(text, speed, volume);
 }
 
 // Lets the backend prepare the next chunk while the current one is playing
-export async function prefetchSpeech(text) {
+export async function prefetchSpeech(text, speed = 1) {
   const go = getGoBinding();
   if (!go || !go.PrefetchSpeech) return;
-  return go.PrefetchSpeech(text);
+  return go.PrefetchSpeech(text, speed);
 }
 
 export async function stopSpeaking() {
